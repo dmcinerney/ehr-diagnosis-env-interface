@@ -56,6 +56,7 @@ for i in range(1000):
             st.write('**cumulative reward**: {}'.format(st.session_state['cumulative_reward']))
             for k, v in info.items():
                 st.write('**{}**: {}'.format(k, v))
+            st.write('**evidence_is_retrieved**: {}'.format(observation['evidence_is_retrieved']))
             if len(info['current_targets']) == 0:
                 st.warning('No targets so this is a dead environment! You can move to another instance.')
             st.subheader("Evidence")
@@ -84,8 +85,6 @@ for i in range(1000):
             submit_button_container = st.container()
             st.subheader("Reports")
             filter_reports = st.checkbox('Filter Reports', key=f'filter reports {i}')
-            run_extraction = st.checkbox('Run extraction', key=f'run extraction {i}')
-            show_raw = st.checkbox('Show Extracted Raw Output', key=f'show raw {i}')
             display_report(
                 filter_dataframe(
                     process_reports(observation['reports']), string_match_filter if filter_reports else ''),

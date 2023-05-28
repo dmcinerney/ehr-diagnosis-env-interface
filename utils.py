@@ -85,10 +85,11 @@ def display_report(reports_df, key):
 def get_environment():
     return gymnasium.make(
         'ehr_diagnosis_env/EHRDiagnosisEnv-v0',
-        model_name='google/flan-t5-xl',
-        # model_name='google/flan-t5-xxl'
+        # model_name='google/flan-t5-xl',
+        model_name='google/flan-t5-xxl',
         progress_bar=stqdm,
     )
+
 
 @st.cache_resource
 def set_environment_instances(_env, _df, args, split, string_match_filter):
