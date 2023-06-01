@@ -74,7 +74,7 @@ def display_report(reports_df, key):
         st.write('No reports to display.')
         return None, None
     report_names = reports_df.report_name
-    report_name = st.selectbox('Choose a report', report_names, key=key)
+    report_name = st.selectbox('Choose a report', report_names, key=key, index=len(report_names) - 1)
     report_row = reports_df[reports_df.report_name == report_name].iloc[0]
     st.write(f'Description: {report_row.description}')
     st.divider()
