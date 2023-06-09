@@ -82,7 +82,7 @@ def display_report(reports_df, key):
 
 
 @st.cache_resource
-def get_environment():
+def get_environment(args):
     return gymnasium.make(
         'ehr_diagnosis_env/EHRDiagnosisEnv-v0',
         # model_name='google/flan-t5-xl',
@@ -93,4 +93,27 @@ def get_environment():
 
 @st.cache_resource
 def set_environment_instances(_env, _df, args, split, string_match_filter):
-    _env.set_instances(_df)
+    _env.set_instances(_df, cache_path=args['data']['cache_path'],)
+
+
+class JumpTo:
+    def __init__(self, env, jump_to, instance_index):
+        self.env = env
+        self.jump_to = jump_to - 1
+        self.instance_index = instance_index
+
+    def __call__(self):
+        current_timestep = len(st.session_state['steps'])
+        if self.jump_to >= current_timestep:
+            st.session_state['skip_to'] = self.jump_to + 1
+            return
+        st.session_state['skip_to'] = None
+        for i in range(current_timestep - 1, self.jump_to - 1, -1):
+            _, reward, _, _, _ = st.session_state['steps'][i]
+            del st.session_state['steps'][i]
+            del st.session_state['actions'][i]
+        with st.spinner('re-running environment to rewind'):
+            # we can do this because we know the environment is not stochastic
+            self.env.reset(options={'instance_index': self.instance_index})
+            for step in range(self.jump_to):
+                self.env.step(st.session_state['actions'][step])

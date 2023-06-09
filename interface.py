@@ -9,17 +9,9 @@ from omegaconf import OmegaConf
 
 actor_checkpoints = {
     'supervised': (
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230530_203831-q71s5dsd/files/ckpt_epoch=30_updates=1448.pt',
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230530_203831-q71s5dsd/files/config.yaml'
+        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230604_010745-6xacw8w1/files/ckpt_epoch=8_updates=986.pt',
+        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230604_010745-6xacw8w1/files/config.yaml'
     ),
-    'supervised2': (
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230530_203831-q71s5dsd/files/ckpt_epoch=85_updates=4020.pt',
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230530_203831-q71s5dsd/files/config.yaml'
-    ),
-    'supervised3': (
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230601_092842-fzso76y6/files/ckpt_epoch=1_updates=236.pt',
-        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230601_092842-fzso76y6/files/config.yaml'
-    )
 }
 @st.cache_resource
 def get_actor(actor_checkpoint):
@@ -43,24 +35,28 @@ def sample_action(observation, actor_checkpoint):
         dist = actor.parameters_to_dist(*parameters)
     # action = dist.sample()
     if isinstance(actor, InterpretableDirichletActor):
-        # st.write(dist.base_dist.mode)
-        action = torch.log(dist.base_dist.mode)
+        # action = torch.log(dist.base_dist.mode)
+        action = torch.log(dist.base_dist.mean)
     else:
-        action = dist.mode
+        # action = dist.mode
+        action = dist.mean
     return votes_and_context_strings, parameters, action.detach().numpy()
 
 
 st.set_page_config(layout="wide")
 st.title('EHR Diagnosis Environment Visualizer')
 st.button('Reset session', on_click=reset_session_state)
-reward_button = st.container()
+jump_timestep_container = st.container()
 args = get_args('config.yaml')
 dataset = args['data']['dataset']
 st.write(f'Dataset: \"{dataset}\"')
 splits = get_splits(args)
 with st.sidebar:
     split = st.selectbox('Dataset Split', splits, index=splits.index('val') if 'val' in splits else 0)
-    string_match_filter = st.text_area('String Match Filter (commas are \'and\'s, linebreaks are \'or\'s)')
+    # TODO: need to fix this so that only the selector is effected by filtering but not the underlying dataframe.
+    #   This way, the environment can still use the same cache
+    # string_match_filter = st.text_area('String Match Filter (commas are \'and\'s, linebreaks are \'or\'s)')
+    string_match_filter = ''
     df = get_filtered_dataset(args, split, string_match_filter)
     if len(df) == 0:
         st.warning('No results after filtering.')
@@ -70,8 +66,9 @@ with st.sidebar:
         options.append('Trained Actor')
     policy = st.selectbox(
         'Choose how to pick an action', options)
-    if policy == 'Trained Actor':
-        actor_checkpoint = st.selectbox('Choose your actor', actor_checkpoints.keys())
+    actor_checkpoint = st.selectbox(
+        'Choose your actor', actor_checkpoints.keys(),
+        disabled=not policy == 'Trained Actor')
     st.divider()
     st.write('Configuration')
     st.write(args)
@@ -82,38 +79,25 @@ if len(df) == 0:
 container = st.empty()
 
 
-env = get_environment()
+env = get_environment(args)
 # only does this when changing dataset with args, split, or filter
 set_environment_instances(env, df, args, split, string_match_filter)
 # st.write(str(env.model.model.lm_head.weight.device))
+instance_index = np.where(df.instance_name == instance_name)[0].item()
 if 'reset' not in st.session_state.keys():
     # store the return value of reset for the current instance
     with st.spinner('Extracting information from reports to set up environment...'):
-        st.session_state['reset'] = env.reset(
-            options={
-                'instance_index': np.where(df.instance_name == instance_name)[0].item()})
+        st.session_state['reset'] = env.reset(options={'instance_index': instance_index})
     # store the actions for the current instance
     st.session_state['actions'] = {}
     # store the return value of the step function for the current instance
     st.session_state['steps'] = {}
-    st.session_state['cumulative_reward'] = 0
-def rewind_one_step():
-    i = len(st.session_state['steps']) - 1
-    if i < 0:
-        return
-    _, reward, _, _, _ = st.session_state['steps'][i]
-    st.session_state['cumulative_reward'] -= reward
-    del st.session_state['steps'][i]
-    del st.session_state['actions'][i]
-    with st.spinner('re-running environment to rewind'):
-        # we can do this because we know the environment is not stochastic
-        env.reset(options={'instance_index': np.where(df.instance_name == instance_name)[0].item()})
-        for step in range(i):
-            env.step(st.session_state['actions'][step])
-reward_button.button('Rewind one step', on_click=rewind_one_step)
-
-
+    st.session_state['skip_to'] = None
 observation, info = st.session_state['reset']
+with jump_timestep_container:
+    value = len(st.session_state['steps']) + 1 if st.session_state['skip_to'] is None else st.session_state['skip_to']
+    jump_to = st.number_input('Jump to a step', min_value=1, max_value=info['max_timesteps'], value=value)
+    st.button('Jump', on_click=JumpTo(env, jump_to, instance_index))
 reward = 0
 i = 0
 terminated, truncated = False, False
@@ -127,7 +111,8 @@ while not (terminated or truncated):
             st.write('**evidence_is_retrieved**: {}'.format(observation['evidence_is_retrieved']))
             with st.expander('Environment secrets'):
                 st.write('**reward for previous action**: {}'.format(reward))
-                st.write('**cumulative reward**: {}'.format(st.session_state['cumulative_reward']))
+                cumulative_reward = sum([reward for _, reward, _, _, _ in st.session_state['steps'].values()])
+                st.write('**cumulative reward**: {}'.format(cumulative_reward))
                 for k, v in info.items():
                     if k == 'current_report':
                         continue
@@ -158,6 +143,7 @@ while not (terminated or truncated):
             if policy == 'Choose your own action':
                 action_df = pd.DataFrame({'rating': {d: a for d, a in zip(potential_diagnoses, action)}})
                 edited_df = st.experimental_data_editor(action_df, key=f'action editor {i}')
+                # edited_df = st.data_editor(action_df, key=f'action editor {i}')
                 action_dict = edited_df.to_dict()['rating']
                 action = [action_dict[d] for d in potential_diagnoses]
             elif policy == 'Trained Actor':
@@ -194,17 +180,17 @@ while not (terminated or truncated):
                     elif isinstance(get_actor(actor_checkpoint), InterpretableNormalActor):
                         means, log_stddevs, context_strings = votes_and_context_strings
             action_submitted = st.button('Submit Action', key=f'submit {i}')
-            submit_button_container = st.container()
-            if not action_submitted:
+            skip_past = st.session_state['skip_to'] is not None and \
+                        len(st.session_state['steps']) + 1 < st.session_state['skip_to']
+            # import pdb; pdb.set_trace()
+            # TODO: bug somewhere here
+            if not action_submitted and not skip_past:
+                st.session_state['skip_to'] = None
                 st.stop()
-            elif submit_button_container is not None:
-                with submit_button_container:
-                    with st.spinner('Taking step'):
-                        st.session_state['actions'][i] = action
-                        st.session_state['steps'][i] = env.step(action)
+            with st.spinner('Taking step'):
+                st.session_state['actions'][i] = action
+                st.session_state['steps'][i] = env.step(action)
         observation, reward, terminated, truncated, info = st.session_state['steps'][i]
-        st.session_state['cumulative_reward'] += reward
         i += 1
-env.close()
 with container:
     st.write('Done! Environment was {}.'.format('terminated' if terminated else 'truncated'))
