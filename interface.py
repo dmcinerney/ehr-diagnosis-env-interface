@@ -2,26 +2,30 @@ from utils import *
 import streamlit as st
 import pandas as pd
 import numpy as np
-from ehr_diagnosis_agent.models.actor import InterpretableDirichletActor, InterpretableNormalActor
+from ehr_diagnosis_agent.models.actor import InterpretableDirichletActor, InterpretableNormalActor, InterpretableBetaActor
 import torch
 from omegaconf import OmegaConf
 
 
 actor_checkpoints = {
-    'supervised': (
+    'supervised_dirichlet': (
         '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230604_010745-6xacw8w1/files/ckpt_epoch=8_updates=986.pt',
         '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230604_010745-6xacw8w1/files/config.yaml'
     ),
+    'supervised_beta': (
+        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230612_161749-gjcsiong/files/ckpt_epoch=3_updates=141.pt',
+        '/work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/wandb/run-20230612_161749-gjcsiong/files/config.yaml'
+    ),
+}
+actory_types = {
+    'normal': InterpretableNormalActor,
+    'dirichlet': InterpretableDirichletActor,
+    'beta': InterpretableBetaActor,
 }
 @st.cache_resource
 def get_actor(actor_checkpoint):
     args = OmegaConf.load(actor_checkpoints[actor_checkpoint][1])
-    if args.actor.value.type == 'normal':
-        actor = InterpretableNormalActor(args.actor.value.normal_params)
-    elif args.actor.value.type == 'dirichlet':
-        actor = InterpretableDirichletActor(args.actor.value.dirichlet_params)
-    else:
-        raise Exception
+    actor = actory_types[args.actor.value.type](args.actor.value['{}_params'.format(args.actor.value.type)])
     state_dict = torch.load(actor_checkpoints[actor_checkpoint][0])['actor']
     actor.load_state_dict(state_dict)
     actor.eval()
@@ -147,15 +151,20 @@ while not (terminated or truncated):
                 action_dict = edited_df.to_dict()['rating']
                 action = [action_dict[d] for d in potential_diagnoses]
             elif policy == 'Trained Actor':
-                potential_diagnoses_ratings_indices = list(zip(
-                    # potential_diagnoses, action, range(len(action))))
-                    potential_diagnoses, torch.softmax(torch.tensor(action), 0).numpy(), range(len(action))))
+                checkpoint_args = OmegaConf.load(actor_checkpoints[actor_checkpoint][1])
+                if checkpoint_args.actor.value.type == 'beta':
+                    ratings = action
+                    st.write('This actor\'s ratings are independent. (Probabilities do not sum to 1.)')
+                else:
+                    ratings = torch.softmax(torch.tensor(action), 0).numpy()
+                    st.write('This actor\'s ratings are not independent. (Probabilities sum to 1.)')
+                potential_diagnoses_ratings_indices = list(zip(potential_diagnoses, ratings, range(len(action))))
                 potential_diagnoses_ratings_indices = sorted(
                     potential_diagnoses_ratings_indices, key=lambda x: -x[1])
                 c1, c2 = st.columns(2)
                 def format_func(x):
                     d, r, _ = potential_diagnoses_ratings_indices[x]
-                    return '{}\t\t\t({})'.format(d, r)
+                    return '{}\t\t\t({:.0f}%)'.format(d, r * 100)
                 with c1:
                     diagnosis_index = st.radio(
                         'Choose a diagnosis to see what impacted the score.',
@@ -164,19 +173,35 @@ while not (terminated or truncated):
                         key=f'diagnosis to view {i}')
                 diagnosis, rating, index = potential_diagnoses_ratings_indices[diagnosis_index]
                 with c2:
-                    st.write(f'### {diagnosis} (rating={rating})')
+                    st.write('### {} (rating={:.0f}%)'.format(diagnosis, rating * 100))
                     if isinstance(get_actor(actor_checkpoint), InterpretableDirichletActor):
-                        st.write('**average concentration**: {}'.format(parameters[0].mean()))
-                        st.write('**{} concentration**: {}'.format(diagnosis, parameters[0][index]))
+                        st.write('**average of all concentrations**: {:.1f}'.format(parameters[0].mean()))
+                        st.write('**{} concentration**: {:.1f}'.format(diagnosis, parameters[0][index]))
                         concentration_votes, context_strings = votes_and_context_strings
-                        concentrations = torch.nn.functional.softplus(concentration_votes) + .2
+                        concentrations = torch.nn.functional.softplus(concentration_votes) + \
+                            checkpoint_args.actor.value.dirichlet_params.concentration_min
                         evidence_concentrations = list(zip(
                             context_strings, concentrations[index], range(len(context_strings))))
                         evidence_concentrations = sorted(evidence_concentrations, key=lambda x: -x[1])
                         for ec in evidence_concentrations:
                             evidence = ("\"" + ec[0] + "\"") \
                                 if ec[2] > 0 or observation['evidence_is_retrieved'] else 'the report'
-                            st.write(f'- ({ec[1]}) {evidence}')
+                            st.write('- ({:.1f}) {}'.format(ec[1], evidence))
+                    if isinstance(get_actor(actor_checkpoint), InterpretableBetaActor):
+                        st.write('**concentration1**: {:.1f}'.format(parameters[0][index]))
+                        st.write('**concentration0**: {:.1f}'.format(parameters[1][index]))
+                        concentration1_votes, concentration0_votes, context_strings = votes_and_context_strings
+                        concentrations1 = torch.nn.functional.softplus(concentration1_votes) + \
+                            checkpoint_args.actor.value.beta_params.concentration_min
+                        concentrations0 = torch.nn.functional.softplus(concentration0_votes) + \
+                            checkpoint_args.actor.value.beta_params.concentration_min
+                        evidence_concentrations = list(zip(
+                            context_strings, concentrations1[index], concentrations0[index], range(len(context_strings))))
+                        evidence_concentrations = sorted(evidence_concentrations, key=lambda x: -x[1])
+                        for ec in evidence_concentrations:
+                            evidence = ("\"" + ec[0] + "\"") \
+                                if ec[3] > 0 or observation['evidence_is_retrieved'] else 'the report'
+                            st.write('- (alpha={:.1f}, beta={:.1f}) {}'.format(ec[1], ec[2], evidence))
                     elif isinstance(get_actor(actor_checkpoint), InterpretableNormalActor):
                         means, log_stddevs, context_strings = votes_and_context_strings
             action_submitted = st.button('Submit Action', key=f'submit {i}')
