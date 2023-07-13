@@ -36,27 +36,23 @@ def get_dataset(args, split):
     return df
 
 
-def filter_dataframe(df, string_match_filter):
-    if string_match_filter == '':
-        return df
-    def filter(r):
-        term_groups = [
-            [term.strip().lower() in str(r.to_dict()).lower() for term in group.split(',')]
-            for group in string_match_filter.split('\n')]
-        return any([all(group) for group in term_groups])
-    return df[df.apply(filter, axis=1)]
-
-
 @st.cache_data
-def get_filtered_dataset(args, split, string_match_filter):
-    df = get_dataset(args, split)
-    df = filter_dataframe(df, string_match_filter)
-    return df
+def get_valid_instances_filter(_env, args, split, sl=None):
+    cached_instances = _env.get_cached_instances()
+    valid_instances = set()
+    minimum, maximum = [int(x) for x in sl.split('-')]
+    cached_instances = [i for i in cached_instances if i + 1 >= minimum and i + 1 < maximum]
+    for i in stqdm(cached_instances, total=len(cached_instances)):
+        obs, info = _env.reset(options={'instance_index': i})
+        if not _env.is_truncated(obs, info):
+            valid_instances.add(i)
+    filter = pd.Series(range(_env.num_examples())).apply(
+        lambda x: x in valid_instances)
+    return filter
 
 
-def reset_session_state():
-    for k in st.session_state.keys():
-        del st.session_state[k]
+def reset_episode_state():
+    del st.session_state['episode']
 
 
 def get_report_name(row):
@@ -91,9 +87,8 @@ def get_environment(args):
     )
 
 
-@st.cache_resource
-def set_environment_instances(_env, _df, args, split, string_match_filter):
-    _env.set_instances(_df, cache_path=args['data']['cache_path'],)
+def set_environment_instances(env, df, args, split):
+    env.set_instances(df, cache_path=args['data'][f'{split}_cache_path'],)
 
 
 class JumpTo:
@@ -103,17 +98,17 @@ class JumpTo:
         self.instance_index = instance_index
 
     def __call__(self):
-        current_timestep = len(st.session_state['steps'])
+        current_timestep = len(st.session_state['episode']['steps'])
         if self.jump_to >= current_timestep:
-            st.session_state['skip_to'] = self.jump_to + 1
+            st.session_state['episode']['skip_to'] = self.jump_to + 1
             return
-        st.session_state['skip_to'] = None
+        st.session_state['episode']['skip_to'] = None
         for i in range(current_timestep - 1, self.jump_to - 1, -1):
-            _, reward, _, _, _ = st.session_state['steps'][i]
-            del st.session_state['steps'][i]
-            del st.session_state['actions'][i]
+            _, reward, _, _, _ = st.session_state['episode']['steps'][i]
+            del st.session_state['episode']['steps'][i]
+            del st.session_state['episode']['actions'][i]
         with st.spinner('re-running environment to rewind'):
             # we can do this because we know the environment is not stochastic
             self.env.reset(options={'instance_index': self.instance_index})
             for step in range(self.jump_to):
-                self.env.step(st.session_state['actions'][step])
+                self.env.step(st.session_state['episode']['actions'][step])
