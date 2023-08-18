@@ -4,6 +4,8 @@ import os
 import streamlit as st
 import io
 import ehr_diagnosis_env
+from ehr_diagnosis_env.utils import get_model_interface
+from sentence_transformers import SentenceTransformer
 import gymnasium
 from stqdm import stqdm
 
@@ -37,14 +39,16 @@ def get_dataset(args, split):
 
 
 @st.cache_data
-def get_valid_instances_filter(_env, args, split, sl=None):
+def get_valid_instances_filter(_env, args, split, sl, **kwargs):
     cached_instances = _env.get_cached_instances()
     valid_instances = set()
     minimum, maximum = [int(x) for x in sl.split('-')]
-    cached_instances = [i for i in cached_instances if i + 1 >= minimum and i + 1 < maximum]
+    cached_instances = [i for i in cached_instances if i + 1 >= minimum and i + 1 <= maximum]
     for i in stqdm(cached_instances, total=len(cached_instances)):
-        obs, info = _env.reset(options={'instance_index': i})
-        if not _env.is_truncated(obs, info):
+        obs, info = _env.reset(options=get_reset_options(args, i))
+        terminated = _env.is_terminated(obs, info)
+        truncated = _env.is_truncated(obs, info)
+        if not (terminated or truncated):
             valid_instances.add(i)
     filter = pd.Series(range(_env.num_examples())).apply(
         lambda x: x in valid_instances)
@@ -78,21 +82,36 @@ def display_report(reports_df, key):
 
 
 @st.cache_resource
-def get_environment(args):
+def get_env_models(args):
+    return get_model_interface('google/flan-t5-xxl'), \
+        SentenceTransformer('all-MiniLM-L6-v2')
+
+
+@st.cache_resource
+def get_environment(args, split, _instances, _llm_interface, _fmm_interface,
+                    **kwargs):
     return gymnasium.make(
         'ehr_diagnosis_env/EHRDiagnosisEnv-v0',
-        # model_name='google/flan-t5-xl',
-        model_name='google/flan-t5-xxl',
+        instances=_instances,
+        cache_path=args['data'][f'{split}_cache_path'],
+        llm_name_or_interface=_llm_interface,
+        fmm_name_or_interface=_fmm_interface,
         progress_bar=stqdm,
+        **kwargs
     )
 
 
-def set_environment_instances(env, df, args, split):
-    env.set_instances(df, cache_path=args['data'][f'{split}_cache_path'],)
+def get_reset_options(args, i):
+    options = {'instance_index': i}
+    if args['data']['max_reports_considered'] is not None:
+        options['max_reports_considered'] = \
+            args['data']['max_reports_considered']
+    return options
 
 
 class JumpTo:
-    def __init__(self, env, jump_to, instance_index):
+    def __init__(self, args, env, jump_to, instance_index):
+        self.args = args
         self.env = env
         self.jump_to = jump_to - 1
         self.instance_index = instance_index
@@ -109,6 +128,6 @@ class JumpTo:
             del st.session_state['episode']['actions'][i]
         with st.spinner('re-running environment to rewind'):
             # we can do this because we know the environment is not stochastic
-            self.env.reset(options={'instance_index': self.instance_index})
+            self.env.reset(options=get_reset_options(self.args, self.instance_index))
             for step in range(self.jump_to):
                 self.env.step(st.session_state['episode']['actions'][step])

@@ -1,6 +1,21 @@
 data:
   path: /work/frink/mcinerney.de/datasets/mimic-iii/physionet.org/files/mimiciii/1.4/preprocessed
   dataset: reports_and_codes3
-  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/.cache/cache-train-1
-  val_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/.cache/cache-val-1
-  test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/.cache/cache-test-1
+  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_1
+  val_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val_cache_1
+  test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_test_cache_1
+  max_reports_considered: null
+models:
+  bert_with_rf:
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230804_090224-la9fj3nx/files/ckpt_epoch=266_updates=17674.pt'
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230804_090224-la9fj3nx/files/config.yaml'
+  interpretable_with_rf:
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230807_145203-h4tbdnnp/files/ckpt_epoch=85_updates=4260.pt'
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230807_145203-h4tbdnnp/files/config.yaml'
+  interpretable_with_rf_and_nota:
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230812_004109-oomrpc0z/files/ckpt_epoch=65_updates=3107.pt'
+    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230812_004109-oomrpc0z/files/config.yaml'
+annotations:
+  annotate: true
+  path: /scratch/mcinerney.de/ehr-diagnosis-agent-output/annotations
+skip_query: true

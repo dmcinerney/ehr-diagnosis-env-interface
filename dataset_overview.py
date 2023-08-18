@@ -14,9 +14,11 @@ from scipy.stats import pearsonr
 @st.cache_data
 def get_cache(cache_dir):
     instances = []
-    files = os.listdir(cache_dir)
+    files = os.listdir(os.path.join(cache_dir, 'extracted_info'))
     for file in files:
-        with open(os.path.join(cache_dir, file), 'rb') as f:
+        if os.path.isdir(file):
+            continue
+        with open(os.path.join(cache_dir, 'extracted_info', file), 'rb') as f:
             instance = pkl.load(f)
         key = next(iter(instance.keys()))
         instance = instance[key]
@@ -129,7 +131,7 @@ def get_fuzzy_matches(term, options, threshold=.85):
 st.set_page_config(layout="wide")
 st.title('Dataset Overview')
 args = get_args('config.yaml')
-split = st.selectbox('Select the split', ['train'])
+split = st.selectbox('Select the split', ['val', 'train'])
 # split = st.selectbox('Select the split', ['train', 'val', 'test'])
 cache_info = get_cache(args['data'][f'{split}_cache_path'])
 columns_to_filter = {}
@@ -146,7 +148,8 @@ for column in set_columns:
         options)
     if len(terms) > 0:
         if add_fuzzy_matching_terms:
-            options.remove(terms)
+            for term in terms:
+                options.remove(term)
             fuzzy_matches = get_fuzzy_matches(terms, options)
             terms += fuzzy_matches
         st.write('Terms: ' + ', '.join(terms))
