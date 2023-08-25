@@ -31,54 +31,30 @@ def get_instance_name(args, row):
            f'{len(reports)} reports)'
 
 
-@st.cache_data
+@st.cache_resource
 def get_dataset(args, split):
     df = pd.read_csv(os.path.join(args['data']['path'], args['data']['dataset'], f'{split}.data'), compression='gzip')
     df['instance_name'] = df.apply(lambda r: get_instance_name(args, r), axis=1)
     return df
 
 
-@st.cache_data
-def get_valid_instances_filter(_env, args, split, sl, **kwargs):
-    cached_instances = _env.get_cached_instances()
-    valid_instances = set()
-    minimum, maximum = [int(x) for x in sl.split('-')]
-    cached_instances = [i for i in cached_instances if i + 1 >= minimum and i + 1 <= maximum]
-    for i in stqdm(cached_instances, total=len(cached_instances)):
-        obs, info = _env.reset(options=get_reset_options(args, i))
-        terminated = _env.is_terminated(obs, info)
-        truncated = _env.is_truncated(obs, info)
-        if not (terminated or truncated):
-            valid_instances.add(i)
-    filter = pd.Series(range(_env.num_examples())).apply(
-        lambda x: x in valid_instances)
-    return filter
-
-
 def reset_episode_state():
     del st.session_state['episode']
+    if 'display_report_timer' in st.session_state.keys():
+        del st.session_state['display_report_timer']
 
 
 def get_report_name(row):
     return '{}. {} - {} ({})'.format(row.name + 1, row.hadm_id, row.report_type, row.date.strftime('%m/%d/%Y'))
 
 
+def df_from_string(df):
+    return pd.read_csv(io.StringIO(df))
+
+
 def process_reports(reports):
-    reports = pd.read_csv(io.StringIO(reports), parse_dates=['date'])
     reports['report_name'] = reports.apply(get_report_name, axis=1)
     return reports
-
-
-def display_report(reports_df, key):
-    if len(reports_df) == 0:
-        st.write('No reports to display.')
-        return None, None
-    report_names = reports_df.report_name
-    report_name = st.selectbox('Choose a report', report_names, key=key, index=len(report_names) - 1)
-    report_row = reports_df[reports_df.report_name == report_name].iloc[0]
-    st.write(f'Description: {report_row.description}')
-    st.divider()
-    st.write(report_row.text)
 
 
 @st.cache_resource
@@ -101,11 +77,12 @@ def get_environment(args, split, _instances, _llm_interface, _fmm_interface,
     )
 
 
-def get_reset_options(args, i):
+def get_reset_options(args, i, **kwargs):
     options = {'instance_index': i}
     if args['data']['max_reports_considered'] is not None:
         options['max_reports_considered'] = \
             args['data']['max_reports_considered']
+    options.update(kwargs)
     return options
 
 

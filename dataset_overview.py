@@ -142,6 +142,10 @@ add_fuzzy_matching_terms = st.checkbox('Add fuzzy matching terms')
 for column in set_columns:
     options = sorted(list(set().union(
         *cache_info[column].tolist())), key=lambda x: -counters[column][x])
+    must_include = st.text_input(
+        f'Filter \"{column}\" selector to terms that include:')
+    if must_include != '':
+        options = [o for o in options if must_include in o]
     terms = st.multiselect(
         f'Filter to patients that include the selected word in the '
         f'\"{column}\"',

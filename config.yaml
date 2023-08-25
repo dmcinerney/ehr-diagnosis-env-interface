@@ -6,16 +6,18 @@ data:
   test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_test_cache_1
   max_reports_considered: null
 models:
-  bert_with_rf:
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230804_090224-la9fj3nx/files/ckpt_epoch=266_updates=17674.pt'
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230804_090224-la9fj3nx/files/config.yaml'
-  interpretable_with_rf:
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230807_145203-h4tbdnnp/files/ckpt_epoch=85_updates=4260.pt'
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230807_145203-h4tbdnnp/files/config.yaml'
-  interpretable_with_rf_and_nota:
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230812_004109-oomrpc0z/files/ckpt_epoch=65_updates=3107.pt'
-    - '/scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230812_004109-oomrpc0z/files/config.yaml'
+  intepretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230824_191417-zvau1kvt/files/ckpt_epoch=50_updates=519.pt
+  # interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233521-oz83hix3/files/ckpt_epoch=120_updates=1197.pt
+  # interpretable_with_attn: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233534-bwam3e0t/files/ckpt_epoch=55_updates=541.pt
+  # bert: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233547-efo05cvk/files/ckpt_epoch=100_updates=1022.pt
+  # interpretable_independent: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230823_120919-h2q1uteq/files/ckpt_epoch=65_updates=653.pt
+model_outputs:
+  val:
+    interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230824_191417-zvau1kvt/files/val_metrics_ckpt_epoch=50_updates=519_episodes.csv
+    # interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233521-oz83hix3/files/val_metrics_ckpt_epoch=120_updates=1197_episodes.csv
+    # interpretable_with_attn: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233534-bwam3e0t/files/val_metrics_ckpt_epoch=55_updates=541_episodes.csv
+    # bert: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233547-efo05cvk/files/val_metrics_ckpt_epoch=100_updates=1022_episodes.csv
+    # interpretable_independent: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230823_120919-h2q1uteq/files/val_metrics_ckpt_epoch=65_updates=653_episodes.csv
 annotations:
-  annotate: true
   path: /scratch/mcinerney.de/ehr-diagnosis-agent-output/annotations
 skip_query: true
