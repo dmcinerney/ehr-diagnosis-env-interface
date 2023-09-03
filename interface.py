@@ -79,17 +79,10 @@ def sample_action(args, observation, actor_checkpoint, sample_type='mean'):
         action_stddev
 
 
-@st.cache_data
-def get_instance_metadata(_env, args, split, **kwargs):
-    df = _env.get_cached_instance_dataframe().sort_index().reset_index()
-    df = df.rename(columns={'index': 'episode_idx'})
-    return df
-
-
 @st.cache_resource
 def get_instance_metadata_with_model_output_metadata(
-        _env, outputs_to_add, args, split, **kwargs):
-    df = get_instance_metadata(_env, args, split, **kwargs)
+        _env, outputs_to_add, args, split):
+    df = get_instance_metadata(_env, args, split)
     if outputs_to_add != 'No model selected':
         model_outputs = pd.read_csv(
             args['model_outputs'][split][outputs_to_add])
@@ -97,21 +90,26 @@ def get_instance_metadata_with_model_output_metadata(
     return df
 
 
-def make_plot(options, probs, not_dist=False):
+def make_plot(options, probs, not_dist=False, ylabel='probability', ax=None):
     data = pd.DataFrame({
         'option': options,
-        'probability': probs,
+        ylabel: probs,
     })
     # st.bar_chart(data, x='option', y='probability')
-    fig, ax = plt.subplots(1, 1, figsize=(4, 4))
-    chart = sns.barplot(data, x='option', y='probability', ax=ax)
+    if ax is None:
+        fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+    else:
+        fig = None
+    chart = sns.barplot(data, x='option', y=ylabel, ax=ax)
     if not not_dist:
         chart.set_ylim(0, 1)
     ax.spines[['right', 'top']].set_visible(False)
+    ax.set_xlabel("")
     ax.set_xticklabels(ax.get_xticklabels(), rotation = 20)
     for i, v in enumerate(probs):
-        ax.text(i - .1, v.item() + 0.01, '{:.1f}%'.format(v.item() * 100))
-    st.pyplot(fig)
+        ax.text(i - .2, v.item() + 0.01, '{:.1f}%'.format(v.item() * 100))
+    if fig is not None:
+        st.pyplot(fig)
 
 
 st.set_page_config(layout="wide")
@@ -129,7 +127,7 @@ with st.sidebar:
                 del st.session_state['display_report_timer']
         show_state = st.checkbox('Show state')
         num_evidence_to_annotate = st.number_input(
-            'Number of evidence snippets to annotate', min_value=1, value=5)
+            'Number of evidence snippets to annotate', min_value=1, value=10)
         show_remaining_anns = st.checkbox('Show remaining evidence')
     show_instance_metadata = st.checkbox('Show instance metadata')
     ignore_selected_evidence = st.checkbox('Ignore selected evidence types')
@@ -141,41 +139,19 @@ with st.sidebar:
     st.write('#### Environment')
     use_random_start_idx = st.checkbox(
         'Start at a random timestep', on_change=reset_episode_state)
+    reward_type = args['env']['reward_type']
     if actor_checkpoint != 'Choose your own actions':
         checkpoint_args = get_checkpoint_args(args, actor_checkpoint)
         st.write(f'Reward type: {checkpoint_args.env.value.reward_type}')
-        reward_type = checkpoint_args.env.value.reward_type
-    else:
-        reward_type = st.selectbox(
-            'Reward type',
-            ['continuous_independent', 'continuous_dependent', 'ranking'])
+        assert reward_type == checkpoint_args.env.value.reward_type
     split = st.selectbox(
         'Dataset Split', splits,
-        index=splits.index('val') if 'val' in splits else 0,
+        index=splits.index('val1') if 'val1' in splits else 0,
         on_change=reset_episode_state)
-    env_kwargs = {
-        'add_risk_factor_queries': st.checkbox(
-            'Add risk factor queries', value=True,
-            on_change=reset_episode_state),
-        'top_k_evidence': st.number_input(
-            'k queries', min_value=0, value=100,
-            on_change=reset_episode_state),
-        'reward_type': reward_type,
-        'limit_options_with_llm': st.checkbox('Limit options with LLM'),
-        'use_confident_diagnosis_mapping': True,
-    }
-    env_kwargs['add_none_of_the_above_option'] = st.checkbox(
-        'Add \"None of the Above\" option', value=False,
-        on_change=reset_episode_state) \
-            if env_kwargs['reward_type'] in [
-                'ranking', 'continuous_dependent'] else False
-    if not env_kwargs['add_none_of_the_above_option']:
-        env_kwargs['num_future_diagnoses_threshold'] = 1
-        env_kwargs['true_positive_minimum'] = 1
     df = get_dataset(args, split)
-    lmm_interface, fmm_interface = get_env_models(args)
+    llm_interface, fmm_interface = get_env_models(args)
     env = get_environment(
-        args, split, df, lmm_interface, fmm_interface, **env_kwargs)
+        args, split, df, llm_interface, fmm_interface)
     st.write('#### Instances')
     options = ['No model selected'] + list(
         args['model_outputs'][split].keys())
@@ -183,8 +159,7 @@ with st.sidebar:
         'Add pre-computed model outputs to the metadata by selecting a model.',
         options)
     instance_metadata = get_instance_metadata_with_model_output_metadata(
-        env, outputs_to_add, args, split, **env_kwargs)
-    # TODO: if files exist, add the processed metadata from the files to the dataframe
+        env, outputs_to_add, args, split)
     filter_instances_string = st.text_input(
         'Type a lambda expression in python that filters instances using their'
         ' cached metadata.')
@@ -326,26 +301,29 @@ def evidence_annotations(step_index, evidence_index):
             '0 - Not aligned with expectations',
             '1 - Aligned with expectations'],
             key=f'individual impact {step_index} {evidence_index}')
-    notes = st.text_area('Other notes (if needed)', key=f'notes {step_index} {evidence_index}')
+    notes = st.text_area('Other notes (if needed)', key=f'evidence notes {step_index} {evidence_index}')
     return {'relevance': relevance, 'impact': impact, 'notes': notes}
 
 
+def get_evidence_dist(actor, parameter_votes_info, evidence_idx):
+    if actor.has_bias and evidence_idx > 0:
+        # first piece of context is always the bias vector
+        slc = torch.tensor([0, evidence_idx])
+    else:
+        slc = torch.tensor([evidence_idx])
+    param_info = actor.votes_to_parameters(
+        parameter_votes_info['diagnosis_embeddings'],
+        parameter_votes_info['context_embeddings'][slc],
+        parameter_votes_info['param_votes'][:, slc])
+    meta_dist = actor.parameters_to_dist(*param_info['params'])
+    return actor.get_mean([meta_dist])[0]
+
+
 def get_evidence_distributions(actor, parameter_votes_info):
-    param_votes = parameter_votes_info['param_votes']
     evidence_distributions = []
-    for evidence_idx in range(param_votes.shape[1]):
-        if actor.has_bias and evidence_idx > 0:
-            # first piece of context is always the bias vector
-            slc = torch.tensor([0, evidence_idx])
-        else:
-            slc = torch.tensor([evidence_idx])
-        param_info = actor.votes_to_parameters(
-            parameter_votes_info['diagnosis_embeddings'],
-            parameter_votes_info['context_embeddings'][slc],
-            param_votes[:, slc])
-        meta_dist = actor.parameters_to_dist(*param_info['params'])
-        option_dist = actor.get_mean([meta_dist])[0]
-        evidence_distributions.append(option_dist)
+    for evidence_idx in range(parameter_votes_info['param_votes'].shape[1]):
+        evidence_distributions.append(get_evidence_dist(
+            actor, parameter_votes_info, evidence_idx))
     return evidence_distributions
 
 
@@ -379,25 +357,25 @@ def get_evidence_scores(
         "[bias vector]")
     agg_over_bias_logits = torch.tensor(action[option_indices]) - \
         evidence_distributions[bias_idx][option_indices]
-    if not annotate:
-        c1, c2, _ = st.expander('bias and agg/bias distributions').columns(
-            [2, 2, 1])
-        with c1:
-            st.write("bias dist")
-            make_evidence_plot(
-                [options[idx] for idx in option_indices],
-                evidence_distributions[bias_idx][option_indices])
-        with c2:
-            st.write("agg/bias dist")
-            # make_evidence_plot(
-            #     [options[idx] for idx in option_indices], agg_over_bias_logits)
-            make_plot(
-                [options[idx] for idx in option_indices],
-                torch.sigmoid(torch.tensor(action[option_indices])) / torch.sigmoid(evidence_distributions[bias_idx][option_indices])
-                if env_kwargs['reward_type'] == 'continuous_independent' else
-                torch.softmax(torch.tensor(action[option_indices]), 0) / torch.softmax(evidence_distributions[bias_idx][option_indices], 0),
-                not_dist=True,
-            )
+    # if not annotate:
+    #     c1, c2, _ = st.expander('bias and agg/bias distributions').columns(
+    #         [2, 2, 1])
+    #     with c1:
+    #         st.write("bias dist")
+    #         make_evidence_plot(
+    #             [options[idx] for idx in option_indices],
+    #             evidence_distributions[bias_idx][option_indices])
+    #     with c2:
+    #         st.write("agg/bias dist")
+    #         # make_evidence_plot(
+    #         #     [options[idx] for idx in option_indices], agg_over_bias_logits)
+    #         make_plot(
+    #             [options[idx] for idx in option_indices],
+    #             torch.sigmoid(torch.tensor(action[option_indices])) / torch.sigmoid(evidence_distributions[bias_idx][option_indices])
+    #             if env_kwargs['reward_type'] == 'continuous_independent' else
+    #             torch.softmax(torch.tensor(action[option_indices]), 0) / torch.softmax(evidence_distributions[bias_idx][option_indices], 0),
+    #             not_dist=True,
+    #         )
     if annotate:
         sort_by = sort_options[0]
     else:
@@ -411,7 +389,7 @@ def get_evidence_scores(
         # scores = actor.get_mean([meta_dist])[0]
         scores = []
         for dist in evidence_distributions:
-            if env_kwargs['reward_type'] == 'continuous_independent':
+            if reward_type == 'continuous_independent':
                 scores.append(torch.sigmoid(
                     dist[option_indices])[selected_option_to_sort_by])
             else:
@@ -445,7 +423,7 @@ def get_evidence_scores(
     elif sort_by == 'Sort by the maximum probability':
         scores = []
         for dist in evidence_distributions:
-            if env_kwargs['reward_type'] == 'continuous_independent':
+            if reward_type == 'continuous_independent':
                 scores.append(torch.sigmoid(dist[option_indices]).max())
             else:
                 scores.append(torch.softmax(dist[option_indices], 0).max())
@@ -464,14 +442,14 @@ def get_evidence_scores(
     elif sort_by == 'Sort by the symmetric KL divergence with the bias ' \
             'distribution':
         scores = []
-        if env_kwargs['reward_type'] == 'continuous_independent':
+        if reward_type == 'continuous_independent':
             bias_distribution = Bernoulli(
                 torch.sigmoid(evidence_distributions[bias_idx][option_indices]))
         else:
             bias_distribution = Categorical(
                 torch.softmax(evidence_distributions[bias_idx][option_indices], 0))
         for dist in evidence_distributions:
-            if env_kwargs['reward_type'] == 'continuous_independent':
+            if reward_type == 'continuous_independent':
                 dist = Bernoulli(
                     torch.sigmoid(dist[option_indices]))
             else:
@@ -486,14 +464,14 @@ def get_evidence_scores(
     elif sort_by == 'Sort by the symmetric KL divergence with the agg/bias ' \
             'distribution':
         scores = []
-        if env_kwargs['reward_type'] == 'continuous_independent':
+        if reward_type == 'continuous_independent':
             agg_over_bias_distribution = Bernoulli(
                 torch.sigmoid(agg_over_bias_logits))
         else:
             agg_over_bias_distribution = Categorical(
                 torch.softmax(agg_over_bias_logits, 0))
         for dist in evidence_distributions:
-            if env_kwargs['reward_type'] == 'continuous_independent':
+            if reward_type == 'continuous_independent':
                 dist = Bernoulli(
                     torch.sigmoid(dist[option_indices]))
             else:
@@ -534,15 +512,27 @@ def get_evidence_strings(parameter_votes_info, parameters_info, scores, score_fo
     return new_strings
 
 
-def make_evidence_plot(options, option_dist):
+def make_evidence_plot(options, option_dist, bias_dist=None):
     option_dist = torch.sigmoid(option_dist) \
-        if env_kwargs['reward_type'] == 'continuous_independent' else \
+        if reward_type == 'continuous_independent' else \
         torch.softmax(option_dist, 0)
-    # options_scores = sorted(zip(options, option_dist), key=lambda x: -x[1])
-    # for o, od in options_scores:
-    #     st.write('- ({:.1f}%) {}'.format(od * 100, o))
     options = [o.split('(')[0].strip() for o in options]
-    make_plot(options, option_dist)
+    if bias_dist is not None:
+        fig, axs = plt.subplots(2, 1, figsize=(3, 4), sharex=True)
+        ax0 = axs[0]
+        ax1 = axs[1]
+    else:
+        ax0 = None
+    make_plot(options, option_dist, ax=ax0)
+    if bias_dist is not None:
+        bias_dist = torch.sigmoid(bias_dist) \
+            if reward_type == 'continuous_independent' else \
+            torch.softmax(bias_dist, 0)
+        make_plot(options, option_dist / bias_dist, not_dist=True,
+                  ylabel='Risk over Baseline', ax=ax1)
+        ax1.plot([-.5, -.5 + len(options)], [1.0, 1.0], '--', color='black')
+        ax1.set_xlim([-.5,  -.5 + len(options)])
+        st.pyplot(fig)
 
 
 def display_evidence_string(es):
@@ -594,6 +584,11 @@ def display_action_evidence(
             evidence_dists, i)
     evidence_strings = get_evidence_strings(
         parameter_votes_info, parameters_info, scores, score_format)
+    if actor.has_bias:
+        assert evidence_strings[0]['evidence'] == '[bias vector]'
+        bias_dist = evidence_dists[0]
+    else:
+        bias_dist = None
     evidence_info = sorted(zip(
         range(len(evidence_strings)),
         evidence_strings,
@@ -604,8 +599,8 @@ def display_action_evidence(
     if ignore_selected_evidence:
         st.write('Ignore evidence of:')
         evidence_types = sorted(list(set(
-            [es.split('"')[1].split(':')[0]
-            for _, es, _, _ in evidence_info_to_show if '"' in es])))
+            [es['query']
+            for _, es, _, _ in evidence_info_to_show if 'query' in es.keys()])))
         num_columns = 3
         columns = st.columns(num_columns)
         for idx, x in enumerate(evidence_types):
@@ -614,8 +609,8 @@ def display_action_evidence(
                     ignore_evidence_types.add(x)
         evidence_info_to_show = [
             x for x in evidence_info_to_show
-            if '"' not in x[1] or
-            x[1].split('"')[1].split(':')[0] not in ignore_evidence_types]
+            if 'query' not in x[1].keys() or
+            x[1]['query'] not in ignore_evidence_types]
     if annotate:
         anns = {'evidence_anns': {}}
         evidence_info_to_show = evidence_info_to_show[:num_evidence_to_annotate]
@@ -626,7 +621,9 @@ def display_action_evidence(
         c1, c2 = st.columns([1, 3])
         with c1:
             make_evidence_plot(
-                selected_option_strings, ed[torch.tensor(selected_options)])
+                selected_option_strings, ed[torch.tensor(selected_options)],
+                bias_dist=bias_dist[torch.tensor(selected_options)]
+                    if bias_dist is not None else None)
         with c2:
             display_evidence_string(es)
             if annotate:
@@ -641,7 +638,10 @@ def display_action_evidence(
                     with c1:
                         make_evidence_plot(
                             selected_option_strings,
-                            ed[torch.tensor(selected_options)])
+                            ed[torch.tensor(selected_options)],
+                            bias_dist=bias_dist[torch.tensor(selected_options)]
+                                if bias_dist is not None else None)
+                        
                     with c2:
                         display_evidence_string(es)
             anns['options'] = options
@@ -668,6 +668,8 @@ def annotate_timepoint(i, info):
                 f'What is the likelihood of the patient having {option}?',
                 ['Unlikely', 'Somewhat likely', 'Very likely'],
                 key=f'likelihood ann {i} {option}')
+    else:
+        timepoint_anns['invalid_instance_notes'] = st.text_area('Other notes (if needed)', key=f'invalid instance notes {i}')
     # st.write('Given the notes and evidence seen so far, which of the following are correct diagnoses?')
     # selected_options = set()
     # diagnosis_salience = {}
@@ -699,16 +701,17 @@ def annotate_timepoint_end(i, info, anns):
             answers,
             index=answers.index(anns['option_likelihood_anns'][option]),
             key=f'likelihood ann 2 {i} {option}')
+    timepoint_anns['concluding_notes'] = st.text_area('Other notes (if needed)', key=f'concluding notes {i}')
     # timepoint_anns['prediction_ann'] = st.radio('Does the prediction align with your expert intuition?', ['Yes', 'No'], key=f'prediction ann {i}')
     # timepoint_anns['change_opinion'] = st.radio('Does the evidence change your opinion?', ['Yes', 'No'], key=f'change opinion ann {i}')
     return timepoint_anns
 
 
-def display_action(options, action, action_stddev, i):
+def display_action(args, options, action, action_stddev, i, actor_checkpoint, parameter_votes_info):
     c1, c2 = st.columns([2, 5])
     anns = {}
     with c2: 
-        if env_kwargs['reward_type'] == 'continuous_independent':
+        if reward_type == 'continuous_independent':
             ratings = torch.sigmoid(torch.tensor(action))
             st.write('This actor\'s scores are interpreted as independent. '
                     '(Probabilities do not sum to 1.)')
@@ -736,9 +739,16 @@ def display_action(options, action, action_stddev, i):
                     selected_options.add(j)
             st.write('Select options above to use to sort the evidence.')
     with c1:
+        actor = get_actor(args, actor_checkpoint)
+        if actor.has_bias:
+            bias_dist = get_evidence_dist(actor, parameter_votes_info, 0)
+            bias_dist = bias_dist[torch.tensor(sorted(selected_options))]
+        else:
+            bias_dist = None
         make_evidence_plot(
             [options[j] for j in selected_options],
-            torch.tensor(action)[torch.tensor(sorted(selected_options))])
+            torch.tensor(action)[torch.tensor(sorted(selected_options))],
+            bias_dist=bias_dist)
     return selected_options, anns
 
 
@@ -801,17 +811,11 @@ def display_report(reports_df, key):
     if len(reports_df) == 0:
         st.write('No reports to display.')
         return
-    if annotate:
-        if 'display_report_timer' in st.session_state.keys() and st.session_state['display_report_timer'] is None:
-            st.write("Reports have disappeared!")
-            return
-        if 'display_report_timer' not in st.session_state.keys() or \
-                st.session_state['display_report_timer'].get_seconds_left() <= 0:
-            st.session_state['display_report_timer'] = Timer(120)
     report_names = reports_df.report_name
-    container = st.empty()
-    with container.container():
-        report_name = st.selectbox('Choose a report', report_names, key=key, index=len(report_names) - 1)
+    def write_report(key_addon):
+        report_name = st.selectbox(
+            'Choose a report', report_names,
+            key=key + ' ' + key_addon, index=len(report_names) - 1)
         report_row = reports_df[reports_df.report_name == report_name].iloc[0]
         st.write(f'Description: {report_row.description}')
         st.divider()
@@ -823,6 +827,18 @@ def display_report(reports_df, key):
         #         st.write(f'Description: {report_row.description}')
         #         st.divider()
         #         st.write(report_row.text)
+    if annotate:
+        if 'display_report_timer' in st.session_state.keys() and st.session_state['display_report_timer'] is None:
+            # st.write("Reports have disappeared!")
+            with st.expander("Reports"):
+                write_report('1')
+            return
+        if 'display_report_timer' not in st.session_state.keys() or \
+                st.session_state['display_report_timer'].get_seconds_left() <= 0:
+            st.session_state['display_report_timer'] = Timer(120)
+    container = st.empty()
+    with container.container():
+        write_report('2')
     if annotate:
         timer_context = st.empty()
         button_context = st.empty()
@@ -840,7 +856,9 @@ def display_report(reports_df, key):
             st.session_state['display_report_timer'] = None
         button_context.empty()
         container.empty()
-        container.write("Reports have disappeared!")
+        # container.write("Reports have disappeared!")
+        with container.expander("Reports"):
+            write_report('3')
 
 
 num_steps_visualized = 0
@@ -917,7 +935,8 @@ while not (terminated or truncated):
                         if not annotate or len(anns['seen_targets']) == 0:
                             # if not annotate:
                             selected_options, action_anns = display_action(
-                                options, action, action_stddev, i)
+                                args, options, action, action_stddev, i,
+                                actor_checkpoint, parameter_votes_info)
                             anns.update(action_anns)
                             # else:
                             #     selected_options = list(range(len(options)))

@@ -15,13 +15,16 @@ from stqdm import stqdm
 def get_args(config_file):
     args_from_cli = OmegaConf.from_cli()
     args_from_yaml = OmegaConf.load(config_file)
-    return OmegaConf.to_container(OmegaConf.merge(args_from_yaml, args_from_cli))
+    return OmegaConf.to_container(OmegaConf.merge(
+        args_from_yaml, args_from_cli))
 
 
 @st.cache_data
 def get_splits(args):
-    files = os.listdir(os.path.join(args['data']['path'], args['data']['dataset']))
-    return [split for split in ['train', 'val', 'test'] if f'{split}.data' in files]
+    files = os.listdir(os.path.join(
+        args['data']['path'], args['data']['dataset']))
+    return [split for split in [
+        'train', 'val1', 'val2', 'test'] if f'{split}.data' in files]
 
 
 def get_instance_name(args, row):
@@ -35,6 +38,13 @@ def get_instance_name(args, row):
 def get_dataset(args, split):
     df = pd.read_csv(os.path.join(args['data']['path'], args['data']['dataset'], f'{split}.data'), compression='gzip')
     df['instance_name'] = df.apply(lambda r: get_instance_name(args, r), axis=1)
+    return df
+
+
+@st.cache_data
+def get_instance_metadata(_env, args, split):
+    df = _env.get_cached_instance_dataframe().sort_index().reset_index()
+    df = df.rename(columns={'index': 'episode_idx'})
     return df
 
 
@@ -65,16 +75,28 @@ def get_env_models(args):
 
 @st.cache_resource
 def get_environment(args, split, _instances, _llm_interface, _fmm_interface,
-                    **kwargs):
-    return gymnasium.make(
-        'ehr_diagnosis_env/EHRDiagnosisEnv-v0',
+                    **override_kwargs):
+    kwargs = dict(
         instances=_instances,
-        cache_path=args['data'][f'{split}_cache_path'],
+        cache_path=args['env'][f'{split}_cache_path'],
         llm_name_or_interface=_llm_interface,
         fmm_name_or_interface=_fmm_interface,
+        reward_type=args['env']['reward_type'],
+        num_future_diagnoses_threshold=
+            args['env']['num_future_diagnoses_threshold'],
         progress_bar=stqdm,
-        **kwargs
+        top_k_evidence=args['env']['top_k_evidence'],
+        verbosity=1, # don't print anything when an environment is dead
+        add_risk_factor_queries=args['env']['add_risk_factor_queries'],
+        limit_options_with_llm=args['env']['limit_options_with_llm'],
+        add_none_of_the_above_option=
+            args['env']['add_none_of_the_above_option'],
+        true_positive_minimum=args['env']['true_positive_minimum'],
+        use_confident_diagnosis_mapping=
+            args['env']['use_confident_diagnosis_mapping'],
     )
+    kwargs.update(override_kwargs)
+    return gymnasium.make('ehr_diagnosis_env/EHRDiagnosisEnv-v0', **kwargs)
 
 
 def get_reset_options(args, i, **kwargs):

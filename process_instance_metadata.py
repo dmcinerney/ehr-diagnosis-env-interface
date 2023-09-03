@@ -1,31 +1,33 @@
-
+from utils import get_args, get_dataset, get_environment, get_env_models
+from tqdm import tqdm
+import pandas as pd
+import os
 
 
 if __name__ == '__main__':
-    env = gymnasium.make(
-        'ehr_diagnosis_env/EHRDiagnosisEnv-v0',
-        instances=_instances,
-        cache_path=args['data'][f'{split}_cache_path'],
-        llm_name_or_interface=_llm_interface,
-        fmm_name_or_interface=_fmm_interface,
-        progress_bar=stqdm,
-        **kwargs
-    )
-    if not annotate:
-        postprocess_metadata = st.button('Postprocess Instance Metadata')
-        if postprocess_metadata:
-            def get_postprocessed_metadata(instance_metadata, env):
-                new_rows = []
-                for i, row in stqdm(instance_metadata.iterrows(), total=len(instance_metadata)):
-                    new_rows.append(row.to_dict())
-                    new_rows[-1].update(env.process_extracted_info({
-                        k: v for k, v in new_rows[-1].items()
-                        if k != 'episode_idx'}))
-                return pd.DataFrame(new_rows)
-            with st.spinner('Postprocessing Instance Metadata'):
-                instance_metadata = get_postprocessed_metadata(
-                    instance_metadata, env)
-            import pdb; pdb.set_trace()
-            # class_prevelances = instance_metadata
-            # with open('class_prevelances.pkl', 'wb') as f:
-            #     pkl.dump(class_prevelances, f)
+    args = get_args('config.yaml')
+    df = get_dataset(args, args['process_metadata']['split'])
+    llm_interface, fmm_interface = get_env_models(args)
+    env = get_environment(
+        args, args['process_metadata']['split'], df, llm_interface, fmm_interface)
+    def get_postprocessed_metadata(instance_metadata, env):
+        new_rows = []
+        for i, row in tqdm(
+                instance_metadata.iterrows(), total=len(instance_metadata)):
+            new_rows.append(row.to_dict())
+            new_rows[-1].update(env.process_extracted_info({
+                k: v for k, v in new_rows[-1].items()
+                if k != 'episode_idx'}))
+        return pd.DataFrame(new_rows)
+    instance_metadata = env.get_cached_instance_dataframe()
+    instance_metadata = instance_metadata.sort_index().reset_index()
+    instance_metadata = instance_metadata.rename(
+        columns={'index': 'episode_idx'})
+    instance_metadata = get_postprocessed_metadata(instance_metadata, env)
+    if not os.path.exists(args['process_metadata']['outdir']):
+        os.mkdir(args['process_metadata']['outdir'])
+    instance_metadata.to_csv(
+        os.path.join(
+            args['process_metadata']['outdir'],
+            args['process_metadata']['split'] + '.csv'),
+        index=False)
