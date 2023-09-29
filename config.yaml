@@ -1,47 +1,36 @@
 data:
   path: /work/frink/mcinerney.de/datasets/mimic-iii/physionet.org/files/mimiciii/1.4/preprocessed
   dataset: reports_and_codes3
-  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_1
-  val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_1
-  val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_1
-  test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_test_cache_1
   max_reports_considered: null
 models:
-  interpretable_maroon: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230825_190819-ewdp2akx/files/ckpt_epoch=210_updates=2127.pt
-  interpretable_silver: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230826_144014-2b2nfmeq/files/ckpt_epoch=145_updates=1437.pt
-  interpretable_purple: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230828_141737-mmdlei4m/files/ckpt_epoch=45_updates=441.pt
-  # intepretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230824_191417-zvau1kvt/files/ckpt_epoch=50_updates=519.pt
-  # interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233521-oz83hix3/files/ckpt_epoch=120_updates=1197.pt
-  # interpretable_with_attn: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233534-bwam3e0t/files/ckpt_epoch=55_updates=541.pt
-  # bert: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233547-efo05cvk/files/ckpt_epoch=100_updates=1022.pt
-  # interpretable_independent: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230823_120919-h2q1uteq/files/ckpt_epoch=65_updates=653.pt
-model_outputs:
-  val1:
-    interpretable_maroon: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230825_190819-ewdp2akx/files/val_metrics_ckpt_epoch=210_updates=2127_episodes.csv
-    interpretable_silver: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230826_144014-2b2nfmeq/files/val_metrics_ckpt_epoch=145_updates=1437_episodes.csv
-    interpretable_purple: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230828_141737-mmdlei4m/files/val_metrics_ckpt_epoch=45_updates=441_episodes.csv
-    # interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230824_191417-zvau1kvt/files/val_metrics_ckpt_epoch=50_updates=519_episodes.csv
-    # interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233521-oz83hix3/files/val_metrics_ckpt_epoch=120_updates=1197_episodes.csv
-    # interpretable_with_attn: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233534-bwam3e0t/files/val_metrics_ckpt_epoch=55_updates=541_episodes.csv
-    # bert: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230820_233547-efo05cvk/files/val_metrics_ckpt_epoch=100_updates=1022_episodes.csv
-    # interpretable_independent: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230823_120919-h2q1uteq/files/val_metrics_ckpt_epoch=65_updates=653_episodes.csv
+  llm_evidence: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230927_194029-jhtf7taf/files/ckpt_epoch=95_updates=679.pt
+  all_sentences: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230925_104538-57jsyt8v/files/ckpt_epoch=240_updates=1920.pt
+model_outputs: {}
+  # val1:
+  #   interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230906_001007-uve48lpv/files/val_metrics_ckpt_epoch=180_updates=1440_episodes.csv
+  #   interpretable_with_dropout: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230906_001046-9ha9a8jj/files/val_metrics_ckpt_epoch=330_updates=2640_episodes.csv
+static_bias_params: # for inference
+  - [-2.642675509576076]
+  - [-1.9572920156106348]
+  - [-1.5961686236710402]
 annotations:
   path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/annotations
+  target_anns_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/target_annotations
 skip_query: true
-process_metadata: 
-  split: train
-  outdir: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/processed_metadata
+random_query: true
 env:
   llm_name: 'google/flan-t5-xxl'
   fmm_name: 'all-MiniLM-L6-v2'
   reward_type: 'continuous_independent'
   num_future_diagnoses_threshold: 1
   true_positive_minimum: 1
-  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_1
-  val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_1
-  val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_1
+  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_2
+  val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_2
+  val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_2
   top_k_evidence: 100
   add_risk_factor_queries: true
   limit_options_with_llm: false
   add_none_of_the_above_option: false
   use_confident_diagnosis_mapping: true
+  skip_instances_with_gt_n_reports: 200
+  exclude_evidence: false

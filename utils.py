@@ -43,27 +43,38 @@ def get_dataset(args, split):
 
 @st.cache_data
 def get_instance_metadata(_env, args, split):
-    df = _env.get_cached_instance_dataframe().sort_index().reset_index()
+    df = _env.get_cached_instance_dataframe().reset_index()
     df = df.rename(columns={'index': 'episode_idx'})
     return df
 
 
 def reset_episode_state():
     del st.session_state['episode']
-    if 'display_report_timer' in st.session_state.keys():
-        del st.session_state['display_report_timer']
 
 
-def get_report_name(row):
-    return '{}. {} - {} ({})'.format(row.name + 1, row.hadm_id, row.report_type, row.date.strftime('%m/%d/%Y'))
+def get_report_name(row, reference_date=None):
+    report_type = row.report_type
+    if row.report_type.strip() == 'Nursing/other':
+        report_type += ': \"{}\"'.format(row.text.strip().split('\n')[0])
+    date = row.date.strftime('%m/%d/%Y') if reference_date is None else \
+        'day {}'.format((row.date - reference_date).days)
+    return '{}. {} - {} ({})'.format(
+        row.name + 1,
+        row.hadm_id,
+        report_type,
+        date,
+    )
 
 
 def df_from_string(df):
     return pd.read_csv(io.StringIO(df))
 
 
-def process_reports(reports):
-    reports['report_name'] = reports.apply(get_report_name, axis=1)
+def process_reports(reports, reference_row_idx=None):
+    kwargs = {}
+    if reference_row_idx is not None:
+        kwargs['reference_date'] = reports.iloc[reference_row_idx].date
+    reports['report_name'] = reports.apply(get_report_name, axis=1, **kwargs)
     return reports
 
 
@@ -94,6 +105,9 @@ def get_environment(args, split, _instances, _llm_interface, _fmm_interface,
         true_positive_minimum=args['env']['true_positive_minimum'],
         use_confident_diagnosis_mapping=
             args['env']['use_confident_diagnosis_mapping'],
+        skip_instances_with_gt_n_reports=
+            args['env']['skip_instances_with_gt_n_reports'],
+        exclude_evidence=args['env']['exclude_evidence'],
     )
     kwargs.update(override_kwargs)
     return gymnasium.make('ehr_diagnosis_env/EHRDiagnosisEnv-v0', **kwargs)
