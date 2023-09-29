@@ -668,8 +668,8 @@ def display_evidence_string(es):
     tag_info = []
     if not annotate:
         tag_info += [('#803df533', 'SCORE', score)]
-    if 'query' in es.keys():
-        tag_info += [('#803df533', 'QUERY', es['query'])]
+        if 'query' in es.keys():
+            tag_info += [('#803df533', 'QUERY', es['query'])]
     if 'report_number' in es:
         tag_info += [
             ('#803df533', 'REPORT NUMBER', es['report_number']),
@@ -1222,8 +1222,10 @@ def run_timestep(
     if show and annotate:
         if len(anns['seen_targets']) > 0:
             model_annotations.empty()
-        assert last_tab_context_for_submit_button is not None
-        with last_tab_context_for_submit_button:
+        if last_tab_context_for_submit_button is not None:
+            with last_tab_context_for_submit_button:
+                submit_annotations = st.button('Submit Annotations', key=f'submit anns {instance_name} {i}')
+        else:
             submit_annotations = st.button('Submit Annotations', key=f'submit anns {instance_name} {i}')
         if submit_annotations:
             write_annotations(

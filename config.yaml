@@ -4,7 +4,7 @@ data:
   max_reports_considered: null
 models:
   llm_evidence: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230927_194029-jhtf7taf/files/ckpt_epoch=95_updates=679.pt
-  all_sentences: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230925_104538-57jsyt8v/files/ckpt_epoch=240_updates=1920.pt
+  all_sentences: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230925_104538-57jsyt8v/files/ckpt_epoch=145_updates=1160.pt
 model_outputs: {}
   # val1:
   #   interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230906_001007-uve48lpv/files/val_metrics_ckpt_epoch=180_updates=1440_episodes.csv
