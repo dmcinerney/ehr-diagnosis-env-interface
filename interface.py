@@ -111,6 +111,44 @@ def make_plot(options, probs, not_dist=False, ylabel='probability', ax=None):
         st.pyplot(fig)
 
 
+def get_annotations(ann_path):
+    if not os.path.exists(ann_path):
+        return pd.DataFrame([])
+    df = {}
+    for filename in os.listdir(ann_path):
+        if filename.startswith('ann_') and filename.endswith('.pkl'):
+            with open(os.path.join(ann_path, filename), 'rb') as f:
+                data = pkl.load(f)
+                value = next(iter(data.values()))
+                if 'model_anns' in value.keys():
+                    if isinstance(value['model_anns'], dict):
+                        value.update({
+                            (k1, k2): v2
+                            for k1, v1 in value['model_anns'].items()
+                            for k2, v2 in v1.items()})
+                    del value['model_anns']
+                df.update(data)
+    return pd.DataFrame.from_dict(df, orient='index')
+
+
+def get_complementory_annotations(args, split):
+    complementory_annotations_dirs = [
+        args['annotations']['path']] + args['annotations']['complementory']
+    comp_anns = pd.DataFrame([])
+    for comp_ann_path in complementory_annotations_dirs:
+        if os.path.exists(os.path.join(comp_ann_path, split)):
+            for annotator_subdir in os.listdir(
+                    os.path.join(comp_ann_path, split)):
+                new_comp_anns = get_annotations(os.path.join(
+                    comp_ann_path, split, annotator_subdir))
+                new_comp_anns['annotator'] = [
+                    annotator_subdir] * len(new_comp_anns)
+                new_comp_anns['base_path'] = [
+                    comp_ann_path] * len(new_comp_anns)
+                comp_anns = pd.concat([comp_anns, new_comp_anns])
+    return comp_anns
+
+
 st.set_page_config(layout="wide")
 st.title('EHR Diagnosis Environment Visualizer')
 args = get_args('config.yaml')
@@ -170,26 +208,55 @@ with st.sidebar:
         outputs_to_add = 'No model selected'
     instance_metadata = get_instance_metadata_with_model_output_metadata(
         env, outputs_to_add, args, split)
-    filter_instances_string = st.text_input(
-        'Type a lambda expression in python that filters instances using their'
-        ' cached metadata.')
     filtered_instance_metadata = instance_metadata
+    min_num_reports = st.number_input(
+        'Minimum Number of Reports', min_value=0, value=10)
+    show_cached_evidence = st.checkbox(
+        'Only show instances with cached evidence', value=True,
+        disabled=min_num_reports > 0,
+        key='disabled' if min_num_reports > 0 else 'not_disabled')
+    if min_num_reports > 0 or show_cached_evidence:
+        filtered_instance_metadata = filtered_instance_metadata[
+            filtered_instance_metadata['is valid timestep'].apply(
+                lambda x: x == x and sum(x) >= min_num_reports)]
+    comp_anns = None
     if annotate:
+        comp_anns = get_complementory_annotations(args, split)
+        if len(comp_anns) > 0:
+            comp_anns = comp_anns[comp_anns.num_reports >= min_num_reports]
+            partially_annotated_instances = set(comp_anns.instance)
+            max_annotated_instance = max(
+                [int(x.split()[2]) for x in partially_annotated_instances])
+            partially_annotated_instance_metadata = filtered_instance_metadata[
+                filtered_instance_metadata['episode_idx'].apply(
+                    lambda x: x + 1 <= max_annotated_instance)]
+        else:
+            max_annotated_instance = None
+            partially_annotated_instance_metadata = None
         if f'balanced_instance_sample_{split}' not in st.session_state.keys():
+            if max_annotated_instance is not None:
+                filtered_instance_metadata = filtered_instance_metadata[
+                    filtered_instance_metadata['episode_idx'].apply(
+                        lambda x: x + 1 > max_annotated_instance)]
             positives = filtered_instance_metadata[
                 filtered_instance_metadata['target diagnosis countdown'].apply(
                     lambda x: x == x and len(x[0]) > 0)]
             negatives = filtered_instance_metadata[
                 filtered_instance_metadata['target diagnosis countdown'].apply(
-                    lambda x: x == x and len(x[0]) == 0)].sample(n=len(positives))
-            st.session_state[f'balanced_instance_sample_{split}'] = pd.concat(
-                [positives, negatives])
+                    lambda x: x == x and len(x[0]) == 0)].sample(
+                        n=len(positives))
+            balanced_instance_sample = pd.concat([positives, negatives])
+            if partially_annotated_instance_metadata is not None:
+                balanced_instance_sample = pd.concat([
+                    partially_annotated_instance_metadata,
+                    balanced_instance_sample])
+            st.session_state[f'balanced_instance_sample_{split}'] = \
+                balanced_instance_sample
         filtered_instance_metadata = st.session_state[
             f'balanced_instance_sample_{split}']
-    if st.checkbox('Only show instances with cached evidence', value=True):
-        filtered_instance_metadata = filtered_instance_metadata[
-            filtered_instance_metadata['is valid timestep'].apply(
-                lambda x: x == x and sum(x) > 0)]
+    filter_instances_string = st.text_input(
+        'Type a lambda expression in python that filters instances using their'
+        ' cached metadata.')
     if filter_instances_string != '':
         filtered_instance_metadata = filtered_instance_metadata[
             filtered_instance_metadata.apply(
@@ -222,11 +289,41 @@ if show_instance_metadata:
             with st.columns([2, 5])[0]:
                 make_plot(options, probs)
 
+
+if annotate:
+    annotator_name = st.text_input('Annotator Name')
 instance_name = st.selectbox(f'Instances ({num_valid})', list(
     df.iloc[valid_instances].instance_name),
     key='instance selection',
+    on_change=reset_episode_state,
     format_func=(lambda x: x) if not annotate else
-        lambda x: ' '.join(x.split()[:2]))
+        lambda x: ' '.join(x.split()[:2]) + (
+            '' if len(comp_anns) == 0 or f'{split} {x}' not in set(comp_anns.instance) else
+            ' ({})'.format(', '.join([
+                f'"{ann}"' if ann != annotator_name else 'You' for ann in set(
+                comp_anns[comp_anns.instance == f'{split} {x}'].annotator)]))
+            ))
+if annotate and len(comp_anns) > 0 and \
+        f'{split} {instance_name}' in set(comp_anns.instance):
+    rows = comp_anns[comp_anns.instance == f'{split} {instance_name}']
+    comp_num_reports = set(rows.num_reports)
+    assert len(comp_num_reports) == 1
+    comp_num_reports = next(iter(comp_num_reports))
+    comp_model_and_sorting = {
+        (i, row.annotator): set(
+            [(k[0], v[0]) for k, v in row.items()
+             if isinstance(k, tuple) and k[1] == 'sort_by_model_order'
+             and v == v])
+        for i, row in rows.iterrows()}
+    comp_model_and_sorting = set().union(*comp_model_and_sorting.values())
+    if len(comp_model_and_sorting) >= 3:
+        st.warning(
+            'All instances are already annotated on this instance: {}'
+            .format(', '.join([str(x) for x in comp_model_and_sorting])))
+        comp_model_and_sorting = None
+else:
+    comp_num_reports = None
+    comp_model_and_sorting = None
 if 'episode' in st.session_state.keys() and \
         instance_name != st.session_state['episode']['instance']:
     reset_episode_state()
@@ -258,9 +355,14 @@ if 'episode' not in st.session_state.keys():
             options=get_reset_options(args, instance_index))
         if use_random_start_idx:
             info = st.session_state['episode']['reset'][1]
-            random_start_idx = random.randint(
-                info['current_report'],
-                info['current_report'] + info['max_timesteps'] // 2 - 1)
+            if comp_num_reports is None:
+                assert min_num_reports - 1 <= info['max_timesteps'] // 2 - 1
+                random_start_idx = random.randint(
+                    info['current_report'] + min_num_reports - 1,
+                    info['current_report'] + info['max_timesteps'] // 2 - 1)
+            else:
+                random_start_idx = info['current_report'] + \
+                    comp_num_reports - 1
             st.session_state['episode']['reset'] = env.reset(
                 options=get_reset_options(
                     args, instance_index, start_report_index=random_start_idx))
@@ -271,12 +373,11 @@ if 'episode' not in st.session_state.keys():
     st.session_state['episode']['skip_to'] = None
     st.session_state['episode']['num_evidence_revealed'] = {}
 
-if annotate:
-    annotator_name = st.text_input('Annotator Name')
-    if annotator_name == '':
-        st.warning(
-            'You need to specify an annotator name to submit annotations.')
-        st.stop()
+
+if annotate and annotator_name == '':
+    st.warning(
+        'You need to specify an annotator name to submit annotations.')
+    st.stop()
 
 container = st.empty()
 
@@ -284,9 +385,11 @@ observation, info = st.session_state['episode']['reset']
 if not annotate and control_state:
     with jump_timestep_container:
         value = len(st.session_state['episode']['steps']) + \
-            1 if st.session_state['episode']['skip_to'] is None else st.session_state['episode']['skip_to']
+            1 if st.session_state['episode']['skip_to'] is None else \
+            st.session_state['episode']['skip_to']
         jump_to = st.number_input(
-            'Jump to a step', min_value=1, max_value=info['max_timesteps'], value=value)
+            'Jump to a step', min_value=1, max_value=info['max_timesteps'],
+            value=value)
         st.button('Jump', on_click=JumpTo(args, env, jump_to, instance_index))
 reward = 0
 i = 0
@@ -302,24 +405,30 @@ def display_state(observation, info, reward):
         st.write(
             f'**is_terminated**: {terminated}')
         st.write(
-            '**evidence_is_retrieved**: {}'.format(observation['evidence_is_retrieved']))
+            '**evidence_is_retrieved**: {}'.format(
+                observation['evidence_is_retrieved']))
     with st.expander('Environment secrets'):
         st.write('**reward for previous action**: {}'.format(reward))
         cumulative_reward = sum(
-            [reward for _, reward, _, _, _ in st.session_state['episode']['steps'].values()])
+            [reward for _, reward, _, _, _ in st.session_state[
+                'episode']['steps'].values()])
         st.write('**cumulative reward**: {}'.format(cumulative_reward))
-        st.write('**max_future_reports**: {}'.format(info['max_timesteps'] // 2))
+        st.write('**max_future_reports**: {}'.format(
+            info['max_timesteps'] // 2))
         for k, v in info.items():
-            if k in ['current_report', 'past_reports', 'future_reports', 'current_targets', 'max_timesteps']:
+            if k in ['current_report', 'past_reports', 'future_reports',
+                     'current_targets', 'max_timesteps']:
                 continue
             st.write('**{}**: {}'.format(k, v))
     if len(info['current_targets']) == 0:
         st.warning(
-            'No targets so this is a dead environment! You can move to another instance.')
+            'No targets so this is a dead environment! '
+            'You can move to another instance.')
 
 
 def evidence_annotations(
-        step_index, evidence_index, sort_by, actor_checkpoint, selected_option_strings=None):
+        step_index, evidence_index, sort_by, actor_checkpoint,
+        selected_option_strings=None):
     if selected_option_strings is None:
         selected_option_strings = ['overall']
     max_cols = 3
@@ -416,7 +525,7 @@ def get_evidence_distributions(actor, parameter_votes_info):
 
 
 def get_evidence_scores(
-        actor, action, options, selected_options, parameter_votes_info, parameters_info, evidence_distributions, i):
+        actor, actor_checkpoint, action, options, selected_options, parameter_votes_info, parameters_info, evidence_distributions, i):
     option_indices = torch.tensor(selected_options)
     sort_options = []
     if 'context_attn_weights' in parameters_info.keys():
@@ -444,7 +553,12 @@ def get_evidence_scores(
             sort_options = [sort_options[0]]
             if not actor.config.use_raw_sentences:
                 sort_options += ['LLM Confidence']
-            random.shuffle(sort_options)
+            if comp_model_and_sorting is not None:
+                for model, sorting in comp_model_and_sorting:
+                    if model == actor_checkpoint:
+                        sort_options.remove(sorting)
+            if len(sort_options) > 1:
+                random.shuffle(sort_options)
             sort_options = sort_options[:1]
             st.session_state['episode']['annotation_sort_options'] = \
                 sort_options
@@ -711,7 +825,7 @@ def display_action_evidence(
         evidence_dists = get_evidence_distributions(
             actor, parameter_votes_info)
         sort_info = get_evidence_scores(
-            actor, action, options, selected_options, parameter_votes_info,
+            actor, actor_checkpoint, action, options, selected_options, parameter_votes_info,
             parameters_info, evidence_dists, i)
     if annotate:
         anns = {'evidence_anns': {}, 'options': options,
@@ -934,7 +1048,7 @@ def display_action(args, options, action, action_stddev, i, actor_checkpoint, pa
 
 
 def write_annotations(
-        split, instance_name, i, observation, info, reports, anns):
+        split, instance_name, i, observation, info, action, reports, anns):
     all_anns = {
         'info': {
             k: v for k, v in info.items()
@@ -942,6 +1056,7 @@ def write_annotations(
         'obs': {
             k: v for k, v in observation.items()
             if k not in ['past_reports', 'reports', 'evidence']},
+        'action': action.tolist(),
         'timestep': i,
         'num_reports': len(reports),
         'instance': f'{split} {instance_name}',
@@ -969,26 +1084,10 @@ def write_annotations(
         pkl.dump({next_idx: all_anns}, f)
 
 
-def get_current_annotations():
-    ann_path = os.path.join(
-        args['annotations']['path'], split, '_'.join(annotator_name.split()))
-    if not os.path.exists(ann_path):
-        return pd.DataFrame([])
-    df = {}
-    for filename in os.listdir(ann_path):
-        if filename.startswith('ann_') and filename.endswith('.pkl'):
-            with open(os.path.join(ann_path, filename), 'rb') as f:
-                data = pkl.load(f)
-                value = next(iter(data.values()))
-                if 'model_anns' in value.keys():
-                    if isinstance(value['model_anns'], dict):
-                        value.update({
-                            (k1, k2): v2
-                            for k1, v1 in value['model_anns'].items()
-                            for k2, v2 in v1.items()})
-                    del value['model_anns']
-                df.update(data)
-    return pd.DataFrame(df).transpose()
+# def get_current_annotations():
+#     ann_path = os.path.join(
+#         args['annotations']['path'], split, '_'.join(annotator_name.split()))
+#     return get_annotations(ann_path)
 
 
 import time
@@ -1009,7 +1108,7 @@ def display_report(reports_df, key):
     def write_report(key_addon):
         report_name = st.selectbox(
             'Choose a report', report_names,
-            key=key + ' ' + key_addon, index=len(report_names) - 1)
+            key=key + ' ' + key_addon, index=0)
         report_row = reports_df[reports_df.report_name == report_name].iloc[0]
         st.write(f'Description: {report_row.description}')
         st.divider()
@@ -1085,6 +1184,7 @@ def show_raw_timestep(
         reports['date'] = pd.to_datetime(reports['date'])
         reports = process_reports(
                     reports, reference_row_idx=info['start_report'])
+        reports = reports[::-1]
         display_report(
                     reports,
                     f'timestep {i + 1}')
@@ -1181,6 +1281,7 @@ def show_model_outputs(
         last_tab_context_for_submit_button
 
 
+from collections import Counter
 def run_timestep(
         args, annotate, use_actor, reward_type, split, env, i,
         instance_name, info, observation, show, anns,
@@ -1199,7 +1300,12 @@ def run_timestep(
         if annotate:
             if 'chosen_actor' not in st.session_state['episode'].keys():
                 weights=[1] * len(actor_checkpoints)
-                weights[actor_checkpoints.index('llm_evidence')] = 2
+                counts = Counter([] if comp_model_and_sorting is None else
+                    [model for model, _ in comp_model_and_sorting])
+                weights[actor_checkpoints.index('all_sentences')] = \
+                    1 - counts['all_sentences']
+                weights[actor_checkpoints.index('llm_evidence')] = \
+                    2 - counts['llm_evidence']
                 st.session_state['episode']['chosen_actor'] = random.choices(
                     actor_checkpoints, weights=weights, k=1)[0]
             tab_actor_checkpoints = [
@@ -1229,11 +1335,13 @@ def run_timestep(
             submit_annotations = st.button('Submit Annotations', key=f'submit anns {instance_name} {i}')
         if submit_annotations:
             write_annotations(
-                split, instance_name, i, observation, info, reports, anns)
+                split, instance_name, i, observation, info, action, reports, anns)
             st.success('The target diagnoses were: ' + ', '.join(
                         [f'\"{k}\" in {v} reports'
                             for k, v in info['target_countdown'].items()]))
-        st.expander('Annotations').write(get_current_annotations())
+        st.expander('Annotations').write(
+            get_complementory_annotations(args, split))
+        # st.expander('Annotations').write(get_current_annotations())
     return action, action_submitted, skip_past
 
 
