@@ -54,8 +54,8 @@ def reset_episode_state():
 
 def get_report_name(row, reference_date=None):
     report_type = row.report_type
-    if row.report_type.strip() == 'Nursing/other':
-        report_type += ': \"{}\"'.format(row.text.strip().split('\n')[0])
+    # if row.report_type.strip() == 'Nursing/other':
+    report_type += ': \"{}\"'.format(row.text.strip().split('\n')[0])
     date = row.date.strftime('%m/%d/%Y') if reference_date is None else \
         'day {}'.format((row.date - reference_date).days)
     return '{}. {} - {} ({})'.format(

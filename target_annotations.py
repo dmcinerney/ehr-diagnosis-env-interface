@@ -6,6 +6,32 @@ import os
 import pickle as pkl
 
 
+def get_annotations(ann_path):
+    anns_df = {}
+    for filename in os.listdir(ann_path):
+        if filename.startswith('ann_') and filename.endswith('.pkl'):
+            with open(os.path.join(ann_path, filename), 'rb') as f:
+                anns_df.update(pkl.load(f))
+    anns_df = pd.DataFrame(anns_df).transpose()
+    return anns_df
+
+
+def get_all_annotations(args, split):
+    anns_df = pd.DataFrame([])
+    ann_dirs = [args['annotations']['target_anns_path']] \
+        + args['annotations']['target_anns_complementary']
+    for ann_dir in ann_dirs:
+        ann_split_dir = os.path.join(
+            ann_dir, split)
+        if os.path.exists(ann_split_dir):
+            for annotator_path in os.listdir(ann_split_dir):
+                anns_df_temp = get_annotations(os.path.join(
+                    ann_split_dir, annotator_path))
+                anns_df_temp['annotator'] = [annotator_path] * len(anns_df_temp)
+                anns_df = pd.concat([anns_df, anns_df_temp])
+    return anns_df
+
+
 st.set_page_config(layout="wide")
 st.title('Diagnosis Extraction Annotations')
 args = get_args('config.yaml')
@@ -41,10 +67,20 @@ with st.sidebar:
 if show_instances:
     instances_expander = st.expander('instances')
     instances_expander.write("")
+anns_df = get_all_annotations(args, split)
+annotator_name = st.text_input('Annotator Name')
+def format_func(x):
+    name = ' '.join(df.iloc[x[1]].instance_name.split()[:2])
+    if 'instance_idx' in anns_df.columns and \
+            x[1] in set(anns_df.instance_idx):
+        annotators = set(anns_df[anns_df.instance_idx == x[1]].annotator)
+        name += ' ({})'.format(', '.join([
+            'You' if '_'.join(annotator_name.split()) == ann else ann
+            for ann in annotators]))
+    return name
 metadata_index, instance_index = st.selectbox(
     f'Instances ({num_valid})', list(enumerate(valid_instances)),
-    format_func=lambda x: ' '.join(df.iloc[x[1]].instance_name.split()[:2]))
-annotator_name = st.text_input('Annotator Name')
+    format_func=format_func) # type: ignore
 if annotator_name == '':
     st.warning(
         'You need to specify an annotator name to submit annotations.')
@@ -111,18 +147,7 @@ if submit_anns:
     with open(new_filepath, 'wb') as f:
         pkl.dump({next_idx: annotations}, f)
 with st.expander('Annotations'):
-    ann_path = os.path.join(
-        args['annotations']['target_anns_path'], split,
-        '_'.join(annotator_name.split()))
-    if not os.path.exists(ann_path):
-        anns_df = pd.DataFrame([])
-    else:
-        anns_df = {}
-        for filename in os.listdir(ann_path):
-            if filename.startswith('ann_') and filename.endswith('.pkl'):
-                with open(os.path.join(ann_path, filename), 'rb') as f:
-                    anns_df.update(pkl.load(f))
-        anns_df = pd.DataFrame(anns_df).transpose()
+    anns_df = get_all_annotations(args, split)
     st.write(anns_df)
 if show_instances:
     with st.spinner('Writing table...'):

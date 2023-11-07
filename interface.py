@@ -1,3 +1,4 @@
+from gc import disable
 from utils import *
 import streamlit as st
 import pandas as pd
@@ -131,11 +132,11 @@ def get_annotations(ann_path):
     return pd.DataFrame.from_dict(df, orient='index')
 
 
-def get_complementory_annotations(args, split):
-    complementory_annotations_dirs = [
-        args['annotations']['path']] + args['annotations']['complementory']
+def get_complementary_annotations(args, split):
+    complementary_annotations_dirs = [
+        args['annotations']['path']] + args['annotations']['complementary']
     comp_anns = pd.DataFrame([])
-    for comp_ann_path in complementory_annotations_dirs:
+    for comp_ann_path in complementary_annotations_dirs:
         if os.path.exists(os.path.join(comp_ann_path, split)):
             for annotator_subdir in os.listdir(
                     os.path.join(comp_ann_path, split)):
@@ -221,7 +222,7 @@ with st.sidebar:
                 lambda x: x == x and sum(x) >= min_num_reports)]
     comp_anns = None
     if annotate:
-        comp_anns = get_complementory_annotations(args, split)
+        comp_anns = get_complementary_annotations(args, split)
         if len(comp_anns) > 0:
             comp_anns = comp_anns[comp_anns.num_reports >= min_num_reports]
             partially_annotated_instances = set(comp_anns.instance)
@@ -233,7 +234,8 @@ with st.sidebar:
         else:
             max_annotated_instance = None
             partially_annotated_instance_metadata = None
-        if f'balanced_instance_sample_{split}' not in st.session_state.keys():
+        if f'balanced_instance_sample_{split}' not in st.session_state.keys() \
+                or st.button('Re-sample Instances'):
             if max_annotated_instance is not None:
                 filtered_instance_metadata = filtered_instance_metadata[
                     filtered_instance_metadata['episode_idx'].apply(
@@ -292,17 +294,31 @@ if show_instance_metadata:
 
 if annotate:
     annotator_name = st.text_input('Annotator Name')
-instance_name = st.selectbox(f'Instances ({num_valid})', list(
-    df.iloc[valid_instances].instance_name),
-    key='instance selection',
-    on_change=reset_episode_state,
-    format_func=(lambda x: x) if not annotate else
+instance_picking_warning = st.empty()
+instance_picking_container = st.empty()
+def write_instance_picker():
+    format_func = (lambda x: x) if not annotate else \
         lambda x: ' '.join(x.split()[:2]) + (
-            '' if len(comp_anns) == 0 or f'{split} {x}' not in set(comp_anns.instance) else
-            ' ({})'.format(', '.join([
-                f'"{ann}"' if ann != annotator_name else 'You' for ann in set(
-                comp_anns[comp_anns.instance == f'{split} {x}'].annotator)]))
-            ))
+        '' if len(comp_anns) == 0 or f'{split} {x}' not in set(
+            comp_anns.instance) else
+        ' ({})'.format(', '.join([
+            f'"{ann}"' if ann != annotator_name else 'You' for ann in set(
+            comp_anns[comp_anns.instance == f'{split} {x}'].annotator)]))
+        )
+    instances = list(df.iloc[valid_instances].instance_name)
+    instance_name = st.selectbox(f'Instances ({num_valid})',
+        instances,
+        key='instance selection',
+        on_change=reset_episode_state,
+        format_func=format_func)
+    return instance_name
+with instance_picking_container:
+    instance_name = write_instance_picker()
+# if annotate and (len(comp_anns) == 0 or annotator_name not in set(
+#         comp_anns[comp_anns.instance == f'{split} {instance_name}'].annotator)):
+#     with instance_picking_warning:
+#         st.warning("You have not submitted this instance yet. Don't change "
+#                    "the instance until you have submitted the annotations!")
 if annotate and len(comp_anns) > 0 and \
         f'{split} {instance_name}' in set(comp_anns.instance):
     rows = comp_anns[comp_anns.instance == f'{split} {instance_name}']
@@ -560,6 +576,7 @@ def get_evidence_scores(
             if len(sort_options) > 1:
                 random.shuffle(sort_options)
             sort_options = sort_options[:1]
+            print('Sorting Method:', sort_options[0])
             st.session_state['episode']['annotation_sort_options'] = \
                 sort_options
         sorting_methods = st.session_state[
@@ -1062,6 +1079,11 @@ def write_annotations(
         'instance': f'{split} {instance_name}',
         'time_for_initial_assesment':
             st.session_state['episode']['time_for_initial_assesment'],
+        'visited_reports':
+            st.session_state['episode']['report_tracker'].visited_reports,
+        'visited_report_timestamps':
+            st.session_state['episode'][
+                'report_tracker'].visited_report_timestamps,
         **anns
     }
     # st.success(all_anns)
@@ -1100,15 +1122,27 @@ class Timer:
         return self.num_total_seconds - (time.time() - self.time_started)
 
 
+class ReportTracker:
+    def __init__(self):
+        self.visited_report_timestamps = []
+        self.visited_reports = []
+
+    def record_current_report(self, timer, report_name):
+        self.visited_report_timestamps.append(-timer.get_seconds())
+        self.visited_reports.append(report_name)
+
+
 def display_report(reports_df, key):
     if len(reports_df) == 0:
         st.write('No reports to display.')
         return
     report_names = reports_df.report_name
-    def write_report(key_addon):
+    def write_report(key_addon, timer=None, tracker=None):
         report_name = st.selectbox(
             'Choose a report', report_names,
             key=key + ' ' + key_addon, index=0)
+        if timer is not None and tracker is not None:
+            tracker.record_current_report(timer, report_name)
         report_row = reports_df[reports_df.report_name == report_name].iloc[0]
         st.write(f'Description: {report_row.description}')
         st.divider()
@@ -1121,6 +1155,7 @@ def display_report(reports_df, key):
         #         st.divider()
         #         st.write(report_row.text)
     timer = None
+    tracker = None
     if annotate:
         if 'display_report_timer' in st.session_state['episode'].keys() and \
                 st.session_state['episode']['display_report_timer'] is None:
@@ -1135,12 +1170,14 @@ def display_report(reports_df, key):
             if start_button_container.button('Start Timer for Initial Assesment'):
                 start_button_container.empty()
                 st.session_state['episode']['display_report_timer'] = Timer(0)
+                st.session_state['episode']['report_tracker'] = ReportTracker()
             else:
                 st.stop()
         timer = st.session_state['episode']['display_report_timer']
+        tracker = st.session_state['episode']['report_tracker']
     container = st.empty()
     with container.container():
-        write_report('2')
+        write_report('2', timer=timer, tracker=tracker)
     if annotate:
         assert timer is not None
         timer_context = st.empty()
@@ -1308,6 +1345,7 @@ def run_timestep(
                     2 - counts['llm_evidence']
                 st.session_state['episode']['chosen_actor'] = random.choices(
                     actor_checkpoints, weights=weights, k=1)[0]
+                print('Model:', st.session_state['episode']['chosen_actor'])
             tab_actor_checkpoints = [
                 st.session_state['episode']['chosen_actor']]
             tabs = st.tabs([
@@ -1339,8 +1377,17 @@ def run_timestep(
             st.success('The target diagnoses were: ' + ', '.join(
                         [f'\"{k}\" in {v} reports'
                             for k, v in info['target_countdown'].items()]))
+            with instance_picking_warning:
+                st.success("You have submitted this instance!")
+        elif len(comp_anns) == 0 or annotator_name not in set(
+                comp_anns[comp_anns.instance == f'{split} {instance_name}'
+                          ].annotator):
+            with instance_picking_warning:
+                st.warning(
+                    "You have not submitted this instance yet. Don't change "
+                    "the instance until you have submitted the annotations!")
         st.expander('Annotations').write(
-            get_complementory_annotations(args, split))
+            get_complementary_annotations(args, split))
         # st.expander('Annotations').write(get_current_annotations())
     return action, action_submitted, skip_past
 

@@ -16,8 +16,12 @@ static_bias_params: # for inference
 annotations:
   path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/annotations
   target_anns_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/target_annotations
-  complementory:
+  complementary:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-29-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-3-23/annotations
+  target_anns_complementary:
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-29-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-3-23/target_annotations
 skip_query: true
 random_query: true
 env:
