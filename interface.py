@@ -150,6 +150,13 @@ def get_complementary_annotations(args, split):
     return comp_anns
 
 
+# class ReloadInstances:
+#     def __init__(self, split):
+#         self.split = split
+#     def __call__(self):
+#         del st.session_state[f'balanced_instance_sample_{self.split}']
+
+
 st.set_page_config(layout="wide")
 st.title('EHR Diagnosis Environment Visualizer')
 args = get_args('config.yaml')
@@ -211,10 +218,13 @@ with st.sidebar:
         env, outputs_to_add, args, split)
     filtered_instance_metadata = instance_metadata
     min_num_reports = st.number_input(
-        'Minimum Number of Reports', min_value=0, value=10)
+        'Minimum Number of Reports', min_value=0, value=10,
+        # on_change=ReloadInstances(split),
+        )
     show_cached_evidence = st.checkbox(
         'Only show instances with cached evidence', value=True,
         disabled=min_num_reports > 0,
+        # on_change=ReloadInstances(split),
         key='disabled' if min_num_reports > 0 else 'not_disabled')
     if min_num_reports > 0 or show_cached_evidence:
         filtered_instance_metadata = filtered_instance_metadata[
@@ -306,8 +316,12 @@ def write_instance_picker():
             comp_anns[comp_anns.instance == f'{split} {x}'].annotator)]))
         )
     instances = list(df.iloc[valid_instances].instance_name)
-    instance_name = st.selectbox(f'Instances ({num_valid})',
+    last_instance_index = 0 if 'last_instance' not in st.session_state.keys() \
+        else instances.index(st.session_state['last_instance'])
+    instance_name = st.selectbox(
+        f'Instances ({num_valid})',
         instances,
+        index=last_instance_index,
         key='instance selection',
         on_change=reset_episode_state,
         format_func=format_func)
@@ -1101,9 +1115,27 @@ def write_annotations(
             next_idx = max(
                 next_idx, int(filename.split('.')[0].split('_')[1]) + 1)
     new_filepath = os.path.join(ann_path, f'ann_{next_idx}.pkl')
-    st.success(f'Writing to: {new_filepath}')
+    # st.success(f'Writing to: {new_filepath}')
+    print(f'Writing to: {new_filepath}')
     with open(new_filepath, 'wb') as f:
         pkl.dump({next_idx: all_anns}, f)
+
+
+class SubmitAnnotationsCallback:
+    def __init__(self, split, instance_name, i, observation, info, action, reports, anns):
+        self.split = split
+        self.instance_name = instance_name
+        self.i = i
+        self.observation = observation
+        self.info = info
+        self.action = action
+        self.reports = reports
+        self.anns = anns
+    def __call__(self):
+        write_annotations(
+            self.split, self.instance_name, self.i, self.observation,
+            self.info, self.action, self.reports, self.anns)
+        st.session_state['last_instance'] = self.instance_name
 
 
 # def get_current_annotations():
@@ -1366,14 +1398,22 @@ def run_timestep(
     if show and annotate:
         if len(anns['seen_targets']) > 0:
             model_annotations.empty()
+        def make_submit_button():
+            return st.button(
+                'Submit Annotations',
+                key=f'submit anns {instance_name} {i}',
+                on_click=SubmitAnnotationsCallback(
+                    split, instance_name, i, observation, info, action,
+                    reports, anns),
+            )
         if last_tab_context_for_submit_button is not None:
             with last_tab_context_for_submit_button:
-                submit_annotations = st.button('Submit Annotations', key=f'submit anns {instance_name} {i}')
+                submit_annotations = make_submit_button()
         else:
-            submit_annotations = st.button('Submit Annotations', key=f'submit anns {instance_name} {i}')
+            submit_annotations = make_submit_button()
         if submit_annotations:
-            write_annotations(
-                split, instance_name, i, observation, info, action, reports, anns)
+            # write_annotations(
+            #     split, instance_name, i, observation, info, action, reports, anns)
             st.success('The target diagnoses were: ' + ', '.join(
                         [f'\"{k}\" in {v} reports'
                             for k, v in info['target_countdown'].items()]))

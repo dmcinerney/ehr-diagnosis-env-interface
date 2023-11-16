@@ -41,7 +41,7 @@ def get_dataset(args, split):
     return df
 
 
-@st.cache_data
+@st.cache_resource
 def get_instance_metadata(_env, args, split):
     df = _env.get_cached_instance_dataframe().reset_index()
     df = df.rename(columns={'index': 'episode_idx'})

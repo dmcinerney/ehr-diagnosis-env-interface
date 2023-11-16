@@ -78,8 +78,12 @@ def format_func(x):
             'You' if '_'.join(annotator_name.split()) == ann else ann
             for ann in annotators]))
     return name
+default_index = 0 if 'last_instance' not in st.session_state.keys() else \
+    list(valid_instances).index(st.session_state['last_instance'])
 metadata_index, instance_index = st.selectbox(
-    f'Instances ({num_valid})', list(enumerate(valid_instances)),
+    f'Instances ({num_valid})',
+    list(enumerate(valid_instances)),
+    index=default_index,
     format_func=format_func) # type: ignore
 if annotator_name == '':
     st.warning(
@@ -123,10 +127,7 @@ for target_diagnosis, countdown, tab in zip(
                 key=f'q2 {instance_index} {target_diagnosis}')
             annotations['diagnosis_anns'][target_diagnosis][
                 'could_be_identified_earlier'] = could_be_identified_earlier
-with tab:
-    submit_anns = st.button('Submit Annotations', key=f'submit {instance_index}')
-if submit_anns:
-    st.success(annotations)
+def submit_annotations(args, split, annotator_name, annotations):
     if not os.path.exists(args['annotations']['target_anns_path']):
         os.mkdir(args['annotations']['target_anns_path'])
     if not os.path.exists(os.path.join(
@@ -143,9 +144,26 @@ if submit_anns:
             next_idx = max(
                 next_idx, int(filename.split('.')[0].split('_')[1]) + 1)
     new_filepath = os.path.join(ann_path, f'ann_{next_idx}.pkl')
-    st.success(f'Writing to: {new_filepath}')
+    # st.success(f'Writing to: {new_filepath}')
+    print(f'Writing to: {new_filepath}')
     with open(new_filepath, 'wb') as f:
         pkl.dump({next_idx: annotations}, f)
+class SubmitAnnotations:
+    def __init__(self, args, split, annotator_name, annotations):
+        self.args = args
+        self.split = split
+        self.annotator_name = annotator_name
+        self.annotations = annotations
+    def __call__(self):
+        submit_annotations(
+            self.args, self.split, self.annotator_name, self.annotations)
+        st.session_state['last_instance'] = self.annotations['instance_idx']
+with tab:
+    submit_anns = st.button(
+        'Submit Annotations', key=f'submit {instance_index}',
+        on_click=SubmitAnnotations(args, split, annotator_name, annotations))
+if submit_anns:
+    st.success(annotations)
 with st.expander('Annotations'):
     anns_df = get_all_annotations(args, split)
     st.write(anns_df)
