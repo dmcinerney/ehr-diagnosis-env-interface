@@ -173,7 +173,9 @@ with st.sidebar:
                 del st.session_state['episode']['display_report_timer']
         num_evidence_to_annotate = st.number_input(
             'Number of evidence snippets to annotate', min_value=1, value=10)
-        show_remaining_anns = st.checkbox('Show remaining evidence')
+    num_evidence_at_a_time = st.number_input(
+        'Amount of evidence to reveal at a time.', min_value=1, value=1)
+    show_remaining_anns = st.checkbox('Show remaining evidence')
     show_state = st.checkbox('Show state')
     control_state = False
     pick_how_to_sort_evidence = False
@@ -253,6 +255,7 @@ with st.sidebar:
             positives = filtered_instance_metadata[
                 filtered_instance_metadata['target diagnosis countdown'].apply(
                     lambda x: x == x and len(x[0]) > 0)]
+            # TODO add in parameter to control sampling
             negatives = filtered_instance_metadata[
                 filtered_instance_metadata['target diagnosis countdown'].apply(
                     lambda x: x == x and len(x[0]) == 0)].sample(
@@ -598,10 +601,14 @@ def get_evidence_scores(
     else:
         sorting_methods = []
         if pick_how_to_sort_evidence:
-            st.write('Choose how to sort the evidence.')
-            for x in sort_options:
-                if st.checkbox(x, key=f'sort by {i} {x}'):
-                    sorting_methods.append(x)
+            # st.write('Choose how to sort the evidence.')
+            with st.expander('Choose how to sort the evidence'):
+                for j, x in enumerate(sort_options):
+                    if st.checkbox(
+                            x,
+                            value=j==0,
+                            key=f'sort by {i} {x} {actor_checkpoint}'):
+                        sorting_methods.append(x)
         else:
             sorting_methods.append(sort_options[0])
     if actor.has_bias:
@@ -836,7 +843,7 @@ class ShowMoreEvidence:
         self.sort_by = sort_by
     def __call__(self):
         st.session_state['episode']['num_evidence_revealed'][
-            (self.i, self.sort_by)] += 1
+            (self.i, self.sort_by)] += num_evidence_at_a_time
 
 
 def display_action_evidence(
@@ -905,24 +912,25 @@ def display_action_evidence(
                     x[1]['query'] not in ignore_evidence_types]
             if annotate:
                 anns['evidence_anns'][sort_by] = {}
-                if (i, sort_by) not in st.session_state[
-                        'episode']['num_evidence_revealed'].keys():
-                    st.session_state[
-                        'episode']['num_evidence_revealed'][(i, sort_by)] = 1
-                num_evidence_revealed = st.session_state[
-                    'episode']['num_evidence_revealed'][(i, sort_by)]
-                evidence_info_to_show = evidence_info_to_show[
-                    :num_evidence_revealed]
-                st.write('Annotate the following evidence snippets retrieved '
-                         'by the model. If more evidence is needed to '
-                         'adequately predict a diagnosis for a patient, please'
-                         ' press the \"Show More Evidence\" button at the '
-                         f'bottom. A maximum of {num_evidence_to_annotate} '
-                         'evidence snippets can be shown per patient.')
-                st.write(f'Only showing the top **{num_evidence_revealed} of '
-                         f'{len(evidence_info)}** pieces of evidence.')
             else:
                 anns = {}
+            if (i, sort_by) not in st.session_state[
+                    'episode']['num_evidence_revealed'].keys():
+                st.session_state[
+                    'episode']['num_evidence_revealed'][(i, sort_by)] = num_evidence_at_a_time
+            num_evidence_revealed = st.session_state[
+                'episode']['num_evidence_revealed'][(i, sort_by)]
+            evidence_info_to_show = evidence_info_to_show[
+                :num_evidence_revealed]
+            if annotate:
+                st.write('Annotate the following evidence snippets retrieved '
+                            'by the model. If more evidence is needed to '
+                            'adequately predict a diagnosis for a patient, please'
+                            ' press the \"Show More Evidence\" button at the '
+                            f'bottom. A maximum of {num_evidence_to_annotate} '
+                            'evidence snippets can be shown per patient.')
+            st.write(f'Only showing the top **{num_evidence_revealed} of '
+                        f'{len(evidence_info)}** pieces of evidence.')
             for evidence_number, (j, es, ed, _) in enumerate(
                     evidence_info_to_show):
                 st.write(f'### {evidence_number+1}.')
@@ -946,32 +954,33 @@ def display_action_evidence(
                             evidence_number
                         anns['evidence_anns'][
                             sort_by][j]['evidence_distribution'] = ed.tolist()
-            if annotate:
-                if show_remaining_anns and \
-                        len(evidence_info) > num_evidence_revealed:
-                    with st.expander('The rest of the evidence.'):
-                        for evidence_number, (j, es, ed, _) in enumerate(
-                                evidence_info[num_evidence_revealed:]):
-                            st.write(f'### {evidence_number+1}.')
-                            c1, c2 = st.columns([1, 3])
-                            with c1:
-                                make_evidence_plot(
-                                    selected_option_strings,
-                                    ed[torch.tensor(selected_options)],
-                                    bias_dist=bias_dist[
-                                        torch.tensor(selected_options)]
-                                        if bias_dist is not None else None)
-                            with c2:
-                                display_evidence_string(es)
-                else:
-                    st.write(f'{len(evidence_info[num_evidence_revealed:])} '
-                             'more evidence snippets not shown.')
-                    if num_evidence_revealed < min(
-                            num_evidence_to_annotate, len(evidence_info)):
-                        st.button(
-                            'Show More Evidence',
-                            key=f'show more evidence {actor_checkpoint} {i} {sort_by}',
-                            on_click=ShowMoreEvidence(i, sort_by))
+            if show_remaining_anns and \
+                    len(evidence_info) > num_evidence_revealed:
+                with st.expander('The rest of the evidence.'):
+                    for evidence_number, (j, es, ed, _) in enumerate(
+                            evidence_info[num_evidence_revealed:]):
+                        st.write(f'### {evidence_number+1}.')
+                        c1, c2 = st.columns([1, 3])
+                        with c1:
+                            make_evidence_plot(
+                                selected_option_strings,
+                                ed[torch.tensor(selected_options)],
+                                bias_dist=bias_dist[
+                                    torch.tensor(selected_options)]
+                                    if bias_dist is not None else None)
+                        with c2:
+                            display_evidence_string(es)
+            else:
+                st.write(f'{len(evidence_info[num_evidence_revealed:])} '
+                            'more evidence snippets not shown.')
+                max_evidence = min(
+                    num_evidence_to_annotate, len(evidence_info)) \
+                    if annotate else len(evidence_info)
+                if num_evidence_revealed < max_evidence:
+                    st.button(
+                        'Show More Evidence',
+                        key=f'show more evidence {actor_checkpoint} {i} {sort_by}',
+                        on_click=ShowMoreEvidence(i, sort_by))
     return anns
 
 
@@ -1340,7 +1349,8 @@ def show_model_outputs(
                 last_tab_context_for_submit_button = concluding_container
             action_submitted = False
         else:
-            action_submitted = st.button('Next Timestep', key=f'submit {i}')
+            action_submitted = st.button(
+                'Next Timestep', key=f'submit {i} {actor_checkpoint}')
     else:
         action_submitted = False
     skip_past = st.session_state['episode']['skip_to'] is not None and \
