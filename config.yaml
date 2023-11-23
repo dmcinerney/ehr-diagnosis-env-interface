@@ -24,6 +24,8 @@ annotations:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-14-23/annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-16-23/annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-17-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-20-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-21-23/annotations
   target_anns_complementary:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-7-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-29-23/target_annotations
@@ -32,6 +34,8 @@ annotations:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-14-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-16-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-17-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-20-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-21-23/target_annotations
 skip_query: true
 random_query: true
 ratio_negative_to_positive: .5
@@ -46,6 +50,7 @@ env:
   val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_2
   top_k_evidence: 100
   add_risk_factor_queries: true
+  risk_factors_file: /work/frink/mcinerney.de/ehr-diagnosis-env/ehr_diagnosis_env/utils/default_env_files/risk_factors.txt
   limit_options_with_llm: false
   add_none_of_the_above_option: false
   use_confident_diagnosis_mapping: true
