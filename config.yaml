@@ -16,6 +16,7 @@ static_bias_params: # for inference
 annotations:
   path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/annotations
   target_anns_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/target_annotations
+  model_explorer_anns_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/model_explorer_annotations
   complementary:
     # - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-7-23/annotations BEFORE INTERFACE WAS FINALIZED
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-29-23/annotations
@@ -26,6 +27,9 @@ annotations:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-17-23/annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-20-23/annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-21-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-30-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_12-11-23/annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_12-14-23/annotations
   target_anns_complementary:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-7-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_9-29-23/target_annotations
@@ -36,6 +40,10 @@ annotations:
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-17-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-20-23/target_annotations
     - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-21-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_11-30-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_12-11-23/target_annotations
+    - /work/frink/mcinerney.de/ehr-diagnosis-annotations/annotations_12-14-23/target_annotations
+  model_explorer_anns_complementary: []
 skip_query: true
 random_query: true
 ratio_negative_to_positive: .5

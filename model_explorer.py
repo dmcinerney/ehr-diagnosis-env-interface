@@ -167,28 +167,48 @@ def get_evidence_dist(actor, parameter_votes_info, evidence_idx):
         return actor.get_mean([meta_dist])[0]
 
 
-# def get_annotations(ann_path):
-#     anns_df = {}
-#     for filename in os.listdir(ann_path):
-#         if filename.startswith('ann_') and filename.endswith('.pkl'):
-#             with open(os.path.join(ann_path, filename), 'rb') as f:
-#                 anns_df.update(pkl.load(f))
-#     anns_df = pd.DataFrame(anns_df).transpose()
-#     return anns_df
+def get_annotations(ann_path):
+    anns_df = {}
+    for filename in os.listdir(ann_path):
+        if filename.startswith('ann_') and filename.endswith('.pkl'):
+            with open(os.path.join(ann_path, filename), 'rb') as f:
+                anns_df.update(pkl.load(f))
+    anns_df = pd.DataFrame(anns_df).transpose()
+    return anns_df
 
 
-# def get_all_annotations(args):
-#     anns_df = pd.DataFrame([])
-#     ann_dirs = [args['annotations']['model_explorer_anns_path']] \
-#         + args['annotations']['model_explorer_anns_complementary']
-#     for ann_dir in ann_dirs:
-#         if os.path.exists(ann_dir):
-#             for annotator_path in os.listdir(ann_dir):
-#                 anns_df_temp = get_annotations(os.path.join(
-#                     ann_dir, annotator_path))
-#                 anns_df_temp['annotator'] = [annotator_path] * len(anns_df_temp)
-#                 anns_df = pd.concat([anns_df, anns_df_temp])
-#     return anns_df
+def get_all_annotations(args):
+    anns_df = pd.DataFrame([])
+    ann_dirs = [args['annotations']['model_explorer_anns_path']] \
+        + args['annotations']['model_explorer_anns_complementary']
+    for ann_dir in ann_dirs:
+        if os.path.exists(ann_dir):
+            for annotator_path in os.listdir(ann_dir):
+                anns_df_temp = get_annotations(os.path.join(
+                    ann_dir, annotator_path))
+                anns_df_temp['annotator'] = [annotator_path] * len(anns_df_temp)
+                anns_df = pd.concat([anns_df, anns_df_temp])
+    return anns_df
+
+
+def submit_annotations(args, annotator_name, annotations):
+    if not os.path.exists(args['annotations']['model_explorer_anns_path']):
+        os.mkdir(args['annotations']['model_explorer_anns_path'])
+    ann_path = os.path.join(
+        args['annotations']['model_explorer_anns_path'],
+        '_'.join(annotator_name.split()))
+    if not os.path.exists(ann_path):
+        os.mkdir(ann_path)
+    next_idx = 0
+    for filename in os.listdir(ann_path):
+        if filename.startswith('ann_') and filename.endswith('.pkl'):
+            next_idx = max(
+                next_idx, int(filename.split('.')[0].split('_')[1]) + 1)
+    new_filepath = os.path.join(ann_path, f'ann_{next_idx}.pkl')
+    # st.success(f'Writing to: {new_filepath}')
+    print(f'Writing to: {new_filepath}')
+    with open(new_filepath, 'wb') as f:
+        pkl.dump({next_idx: annotations}, f)
 
 
 class SubmitAnnotations:
@@ -197,7 +217,7 @@ class SubmitAnnotations:
         self.annotator_name = annotator_name
         self.annotations = annotations
     def __call__(self):
-        pass
+        submit_annotations(self.args, self.annotator_name, self.annotations)
 
 
 st.set_page_config(layout="wide")
@@ -281,7 +301,8 @@ st.write(processed_evidence)
 make_evidence_plot(
     diagnoses,
     torch.tensor(action),
-    bias_dist=torch.tensor(bias_dist), show_bias=True)
+    bias_dist=torch.tensor(bias_dist) if bias_dist is not None else None,
+    show_bias=True)
 annotator_name = st.text_input('Annotator Name')
 if annotator_name == '':
     st.warning(
@@ -291,8 +312,13 @@ annotations = {
     'annotator': annotator_name,
     'model': actor_checkpoint,
     'input_text': input_text,
-
+    'bias_dist': bias_dist.tolist() if bias_dist is not None else None,
+    'predicted_dist': action.tolist(),
+    'notes': st.text_area('Write any notes you have about this example.'),
 }
 submitted = st.button(
     'Submit Annotation',
     on_click=SubmitAnnotations(args, annotator_name, annotations))
+if submitted:
+    st.success(f'Submitted Annotations: {str(annotations)}')
+st.write(get_all_annotations(args))
