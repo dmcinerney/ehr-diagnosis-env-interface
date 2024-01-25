@@ -8,6 +8,9 @@ from ehr_diagnosis_env.utils import get_model_interface
 from sentence_transformers import SentenceTransformer
 import gymnasium
 from stqdm import stqdm
+from collections import defaultdict
+import pickle as pkl
+import os
 
 
 # Get args from a config file and override with cli
@@ -144,3 +147,84 @@ class JumpTo:
             self.env.reset(options=get_reset_options(self.args, self.instance_index))
             for step in range(self.jump_to):
                 self.env.step(st.session_state['episode']['actions'][step])
+
+
+def get_evidence_df(ann_folder):
+    rows = {}
+    for filename in os.listdir(ann_folder):
+        with open(os.path.join(ann_folder, filename), 'rb') as f:
+            d = pkl.load(f)
+            instance_data = next(iter(d.values()))
+            anns = instance_data['model_anns']
+            if len(anns) > 0:
+                assert len(anns) == 1
+                model_type = next(iter(anns.keys()))
+                anns['model_type'] = model_type
+                model_anns = anns[model_type]
+                if len(model_anns) > 0:
+                    assert len(model_anns['sort_by_model_order']) == 1
+                    sort_type = model_anns['sort_by_model_order'][0]
+                    anns['sort_type'] = sort_type
+                    del model_anns['sort_by_model_order']
+                    model_anns['evidence_anns'] = model_anns['evidence_anns'][sort_type]
+                    anns.update(model_anns)
+                del anns[model_type]
+            del instance_data['model_anns']
+            instance_data.update(instance_data['info'])
+            del instance_data['info']
+            instance_data.update(anns)
+            rows.update(d)
+    return pd.DataFrame(rows).transpose().sort_index()
+
+
+def get_full_evidence_df(ann_dirs):
+    dfs = defaultdict(lambda : pd.DataFrame([]))
+    for ann_dir in ann_dirs:
+        date = '_'.join(ann_dir.split('/')[-2].split('_')[1:])
+        for split in os.listdir(ann_dir):
+            for annotator in os.listdir(os.path.join(ann_dir, split)):
+                df = get_evidence_df(os.path.join(ann_dir, split, annotator))
+                df['annotator'] = [annotator] * len(df)
+                df['date'] = [date] * len(df)
+                dfs[split] = pd.concat([dfs[split], df])
+    dfs = {split: df.reset_index() for split, df in dfs.items()}
+    annotator_instance_repeats = defaultdict(lambda: [])
+    for split, df in dfs.items():
+        annotations_to_remove = set()
+        for annotator in set(df.annotator):
+            annotator_df = df[df.annotator == annotator]
+            for instance in set(annotator_df.instance):
+                annotator_instance_df = annotator_df[
+                    annotator_df.instance == instance]
+                if len(annotator_instance_df) > 1:
+                    annotator_instance_repeats[split].append(annotator_instance_df)
+                    annotations_to_remove.update(set(annotator_instance_df[1:].index))
+        dfs[split] = df.drop(index=list(annotations_to_remove))
+    return dfs, dict(annotator_instance_repeats)
+
+
+def get_hallucination_annotations(ann_path):
+    anns_df = {}
+    for filename in os.listdir(ann_path):
+        if filename.startswith('ann_') and filename.endswith('.pkl'):
+            with open(os.path.join(ann_path, filename), 'rb') as f:
+                anns_df.update(pkl.load(f))
+    anns_df = pd.DataFrame(anns_df).transpose()
+    return anns_df
+
+
+def get_all_hallucination_annotations(args, split):
+    anns_df = pd.DataFrame([])
+    ann_dirs = [args['annotations']['hallucination_anns_path']] \
+        + args['annotations']['hallucination_anns_complementary']
+    for ann_dir in ann_dirs:
+        ann_split_dir = os.path.join(
+            ann_dir, split)
+        if os.path.exists(ann_split_dir):
+            for annotator_path in os.listdir(ann_split_dir):
+                anns_df_temp = get_hallucination_annotations(os.path.join(
+                    ann_split_dir, annotator_path))
+                anns_df_temp['annotator'] = [annotator_path] * len(
+                    anns_df_temp)
+                anns_df = pd.concat([anns_df, anns_df_temp])
+    return anns_df
