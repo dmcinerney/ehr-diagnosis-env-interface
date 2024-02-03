@@ -47,7 +47,8 @@ def get_actor(args, actor_checkpoint):
         checkpoint_args.actor.value.type)]
     actor_params.update(checkpoint_args.actor.value['shared_params'])
     # static bias params is set differently during inference
-    actor_params['static_bias_params'] = args['static_bias_params']
+    if args['static_bias_params'] is not None:
+        actor_params['static_bias_params'] = args['static_bias_params']
     actor = actor_types[checkpoint_args.actor.value.type](actor_params)
     state_dict = torch.load(args['models'][actor_checkpoint])['actor']
     actor.load_state_dict(state_dict)
@@ -208,76 +209,83 @@ env = get_environment(
     args, split, df, llm_interface, fmm_interface)
 with st.sidebar:
     st.write('#### Instances')
-    if split in args['model_outputs'].keys():
-        options = ['No model selected'] + list(
-            args['model_outputs'][split].keys())
-        outputs_to_add = st.selectbox(
-            'Add pre-computed model outputs to the metadata by selecting a model.',
-            options)
-    else:
-        outputs_to_add = 'No model selected'
-    instance_metadata = get_instance_metadata_with_model_output_metadata(
-        env, outputs_to_add, args, split)
-    filtered_instance_metadata = instance_metadata
-    min_num_reports = st.number_input(
-        'Minimum Number of Reports', min_value=0, value=10,
-        # on_change=ReloadInstances(split),
-        )
-    show_cached_evidence = st.checkbox(
-        'Only show instances with cached evidence', value=True,
-        disabled=min_num_reports > 0,
-        # on_change=ReloadInstances(split),
-        key='disabled' if min_num_reports > 0 else 'not_disabled')
-    if min_num_reports > 0 or show_cached_evidence:
-        filtered_instance_metadata = filtered_instance_metadata[
-            filtered_instance_metadata['is valid timestep'].apply(
-                lambda x: x == x and sum(x) >= min_num_reports)]
-    comp_anns = None
-    if annotate:
-        comp_anns = get_complementary_annotations(args, split)
-        if len(comp_anns) > 0:
-            comp_anns = comp_anns[comp_anns.num_reports >= min_num_reports]
-            partially_annotated_instances = set(comp_anns.instance)
-            max_annotated_instance = max(
-                [int(x.split()[2]) for x in partially_annotated_instances])
-            partially_annotated_instance_metadata = filtered_instance_metadata[
-                filtered_instance_metadata['episode_idx'].apply(
-                    lambda x: x + 1 <= max_annotated_instance)]
+    if st.checkbox('Require Metadata', value=True):
+        if split in args['model_outputs'].keys():
+            options = ['No model selected'] + list(
+                args['model_outputs'][split].keys())
+            outputs_to_add = st.selectbox(
+                'Add pre-computed model outputs to the metadata by selecting a model.',
+                options)
         else:
-            max_annotated_instance = None
-            partially_annotated_instance_metadata = None
-        if f'balanced_instance_sample_{split}' not in st.session_state.keys() \
-                or st.button('Re-sample Instances'):
-            if max_annotated_instance is not None:
-                filtered_instance_metadata = filtered_instance_metadata[
+            outputs_to_add = 'No model selected'
+        instance_metadata = get_instance_metadata_with_model_output_metadata(
+            env, outputs_to_add, args, split)
+        filtered_instance_metadata = instance_metadata
+        if 'is valid timestep' in filtered_instance_metadata.columns:
+            min_num_reports = st.number_input(
+                'Minimum Number of Reports', min_value=0, value=10,
+                # on_change=ReloadInstances(split),
+                )
+        else:
+            min_num_reports = 0
+        show_cached_evidence = st.checkbox(
+            'Only show instances with cached evidence', value=True,
+            disabled=min_num_reports > 0,
+            # on_change=ReloadInstances(split),
+            key='disabled' if min_num_reports > 0 else 'not_disabled')
+        if (min_num_reports > 0 or show_cached_evidence) and \
+                'is valid timestep' in filtered_instance_metadata.columns:
+            filtered_instance_metadata = filtered_instance_metadata[
+                filtered_instance_metadata['is valid timestep'].apply(
+                    lambda x: x == x and sum(x) >= min_num_reports)]
+        comp_anns = None
+        if annotate:
+            comp_anns = get_complementary_annotations(args, split)
+            if len(comp_anns) > 0:
+                comp_anns = comp_anns[comp_anns.num_reports >= min_num_reports]
+                partially_annotated_instances = set(comp_anns.instance)
+                max_annotated_instance = max(
+                    [int(x.split()[2]) for x in partially_annotated_instances])
+                partially_annotated_instance_metadata = filtered_instance_metadata[
                     filtered_instance_metadata['episode_idx'].apply(
-                        lambda x: x + 1 > max_annotated_instance)]
-            positives = filtered_instance_metadata[
-                filtered_instance_metadata['target diagnosis countdown'].apply(
-                    lambda x: x == x and len(x[0]) > 0)]
-            # TODO add in parameter to control sampling
-            negatives = filtered_instance_metadata[
-                filtered_instance_metadata['target diagnosis countdown'].apply(
-                    lambda x: x == x and len(x[0]) == 0)].sample(
-                        n=len(positives))
-            balanced_instance_sample = pd.concat([positives, negatives])
-            if partially_annotated_instance_metadata is not None:
-                balanced_instance_sample = pd.concat([
-                    partially_annotated_instance_metadata,
-                    balanced_instance_sample])
-            st.session_state[f'balanced_instance_sample_{split}'] = \
-                balanced_instance_sample
-        filtered_instance_metadata = st.session_state[
-            f'balanced_instance_sample_{split}']
-    filter_instances_string = st.text_input(
-        'Type a lambda expression in python that filters instances using their'
-        ' cached metadata.')
-    if filter_instances_string != '':
-        filtered_instance_metadata = filtered_instance_metadata[
-            filtered_instance_metadata.apply(
-                eval(filter_instances_string), axis=1)]
-    valid_instances = filtered_instance_metadata.sort_values(
-        'episode_idx').episode_idx
+                        lambda x: x + 1 <= max_annotated_instance)]
+            else:
+                max_annotated_instance = None
+                partially_annotated_instance_metadata = None
+            if f'balanced_instance_sample_{split}' not in st.session_state.keys() \
+                    or st.button('Re-sample Instances'):
+                if max_annotated_instance is not None:
+                    filtered_instance_metadata = filtered_instance_metadata[
+                        filtered_instance_metadata['episode_idx'].apply(
+                            lambda x: x + 1 > max_annotated_instance)]
+                positives = filtered_instance_metadata[
+                    filtered_instance_metadata['target diagnosis countdown'].apply(
+                        lambda x: x == x and len(x[0]) > 0)]
+                # TODO add in parameter to control sampling
+                negatives = filtered_instance_metadata[
+                    filtered_instance_metadata['target diagnosis countdown'].apply(
+                        lambda x: x == x and len(x[0]) == 0)].sample(
+                            n=len(positives))
+                balanced_instance_sample = pd.concat([positives, negatives])
+                if partially_annotated_instance_metadata is not None:
+                    balanced_instance_sample = pd.concat([
+                        partially_annotated_instance_metadata,
+                        balanced_instance_sample])
+                st.session_state[f'balanced_instance_sample_{split}'] = \
+                    balanced_instance_sample
+            filtered_instance_metadata = st.session_state[
+                f'balanced_instance_sample_{split}']
+        filter_instances_string = st.text_input(
+            'Type a lambda expression in python that filters instances using their'
+            ' cached metadata.')
+        if filter_instances_string != '':
+            filtered_instance_metadata = filtered_instance_metadata[
+                filtered_instance_metadata.apply(
+                    eval(filter_instances_string), axis=1)]
+        valid_instances = filtered_instance_metadata.sort_values(
+            'episode_idx').episode_idx
+    else:
+        valid_instances = np.array(range(len(df)))
     num_valid = len(valid_instances)
     if num_valid == 0:
         st.warning('No results after filtering.')
@@ -430,11 +438,11 @@ terminated, truncated = False, False
 
 
 def display_state(observation, info, reward):
+    terminated = not info['is_valid_timestep']
     if not annotate:
         st.subheader("Information")
         st.write(f'**timestep**: {i + 1}')
         st.write('**report**: {}'.format(info['current_report'] + 1))
-        terminated = not info['is_valid_timestep']
         st.write(
             f'**is_terminated**: {terminated}')
         st.write(
@@ -453,9 +461,9 @@ def display_state(observation, info, reward):
                      'current_targets', 'max_timesteps']:
                 continue
             st.write('**{}**: {}'.format(k, v))
-    if len(info['current_targets']) == 0:
+    if terminated:
         st.warning(
-            'No targets so this is a dead environment! '
+            'Not a valid timestep! '
             'You can move to another instance.')
 
 
@@ -1249,20 +1257,20 @@ def display_report(reports_df, key):
             write_report('3')
 
 
-def show_raw_timestep(
+def raw_timestep(
         annotate, show_state, show_evidence, i, info, observation, reward,
         display_state, display_report, show):
+    reports = pd.concat(
+                [df_from_string(observation['past_reports']),
+                    df_from_string(observation['reports'])]).reset_index()
+    reports['date'] = pd.to_datetime(reports['date'])
+    reports = process_reports(
+                reports, reference_row_idx=info['start_report'])
+    reports = reports[::-1]
     if show:
         if show_state:
             display_state(observation, info, reward)
         st.subheader("Reports")
-        reports = pd.concat(
-                    [df_from_string(observation['past_reports']),
-                     df_from_string(observation['reports'])]).reset_index()
-        reports['date'] = pd.to_datetime(reports['date'])
-        reports = process_reports(
-                    reports, reference_row_idx=info['start_report'])
-        reports = reports[::-1]
         display_report(
                     reports,
                     f'timestep {i + 1}')
@@ -1272,15 +1280,14 @@ def show_raw_timestep(
                 st.write(df_from_string(observation['evidence']))
             else:
                 st.write('No evidence yet!')
-        options = df_from_string(observation['options']).apply(
-            lambda r: f'{r.option} ({r.type})', axis=1).to_list()
-        if annotate:
-            st.write('### Part 1: Pre-model Annotations')
-            anns.update(annotate_timepoint(i, options))
-            # if not annotate or len(anns['seen_targets']) == 0:
-            #     st.subheader("Prediction")
-        return reports, options
-    return None, None
+    options = df_from_string(observation['options']).apply(
+        lambda r: f'{r.option} ({r.type})', axis=1).to_list()
+    if show and annotate:
+        st.write('### Part 1: Pre-model Annotations')
+        anns.update(annotate_timepoint(i, options))
+        # if not annotate or len(anns['seen_targets']) == 0:
+        #     st.subheader("Prediction")
+    return reports, options
 
 
 def show_model_outputs(
@@ -1367,7 +1374,7 @@ def run_timestep(
         actor_checkpoints, reward):
     if not show:
         st.write('')
-    reports, options = show_raw_timestep(
+    reports, options = raw_timestep(
         annotate, show_state, show_evidence, i, info, observation, reward,
         display_state, display_report, show)
     if show and annotate and len(anns['seen_targets']) == 0:

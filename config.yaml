@@ -2,17 +2,18 @@ data:
   path: /work/frink/mcinerney.de/datasets/mimic-iii/physionet.org/files/mimiciii/1.4/preprocessed
   dataset: reports_and_codes3
   max_reports_considered: null
-models:
-  llm_evidence: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230927_194029-jhtf7taf/files/ckpt_epoch=95_updates=679.pt
-  all_sentences: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230925_104538-57jsyt8v/files/ckpt_epoch=145_updates=1160.pt
+models: {}
+  # llm_evidence: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230927_194029-jhtf7taf/files/ckpt_epoch=95_updates=679.pt
+  # all_sentences: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230925_104538-57jsyt8v/files/ckpt_epoch=145_updates=1160.pt
 model_outputs: {}
   # val1:
   #   interpretable: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230906_001007-uve48lpv/files/val_metrics_ckpt_epoch=180_updates=1440_episodes.csv
   #   interpretable_with_dropout: /scratch/mcinerney.de/ehr-diagnosis-agent-output/wandb/run-20230906_001046-9ha9a8jj/files/val_metrics_ckpt_epoch=330_updates=2640_episodes.csv
-static_bias_params: # for inference
-  - [-2.642675509576076]
-  - [-1.9572920156106348]
-  - [-1.5961686236710402]
+# static_bias_params: # for inference
+#   - [-2.642675509576076]
+#   - [-1.9572920156106348]
+#   - [-1.5961686236710402]
+static_bias_params: null
 annotations:
   path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/annotations
   target_anns_path: /work/frink/mcinerney.de/ehr-diagnosis-env-interface/target_annotations
@@ -64,19 +65,31 @@ skip_query: true
 random_query: true
 ratio_negative_to_positive: .5
 env:
-  llm_name: 'google/flan-t5-xxl'
-  fmm_name: 'all-MiniLM-L6-v2'
-  reward_type: 'continuous_independent'
-  num_future_diagnoses_threshold: 1
-  true_positive_minimum: 1
-  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_2
-  val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_2
-  val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_2
+  # env_type: EHRDiagnosisEnv-v0
+  # env_type: FlanEHRDiagnosisEnv-v0
+  env_type: MistralEHRDiagnosisEnv-v0
   top_k_evidence: 100
-  add_risk_factor_queries: true
-  risk_factors_file: /work/frink/mcinerney.de/ehr-diagnosis-env/ehr_diagnosis_env/utils/default_env_files/risk_factors.txt
-  limit_options_with_llm: false
-  add_none_of_the_above_option: false
-  use_confident_diagnosis_mapping: true
+  # llm_name: 'google/flan-t5-xxl'
+  llm_name: 'mistralai/Mistral-7B-Instruct-v0.2'
+  fmm_name: 'all-MiniLM-L6-v2'
+  num_future_diagnoses_threshold: 0
+  match_confident_diagnoses: false
+  match_potential_diagnoses: false
+  true_positive_minimum: 0
+  # train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_flan
+  # val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_flan
+  # val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_flan
+  # test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_test_cache_flan
+  train_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_train_cache_mistral
+  val1_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val1_cache_mistral
+  val2_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_val2_cache_mistral
+  test_cache_path: /work/frink/mcinerney.de/ehr-diagnosis-agent/ehr_diagnosis_agent/.cache/env_test_cache_mistral
+  add_risk_factor_queries: false
+  limit_options_with_llm: true
+  use_confident_diagnosis_mapping: false
   skip_instances_with_gt_n_reports: 200
+  add_diagnosis_options_from_caches: null
+  reward_type: 'continuous_independent'
+  include_alternative_diagnoses: false
+  add_none_of_the_above_option: false
   exclude_evidence: false

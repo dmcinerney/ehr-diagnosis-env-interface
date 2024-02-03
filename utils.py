@@ -83,37 +83,45 @@ def process_reports(reports, reference_row_idx=None):
 
 @st.cache_resource
 def get_env_models(args):
-    return get_model_interface('google/flan-t5-xxl'), \
-        SentenceTransformer('all-MiniLM-L6-v2')
+    return get_model_interface(args['env']['llm_name']), \
+        SentenceTransformer(args['env']['fmm_name'])
 
 
 @st.cache_resource
-def get_environment(args, split, _instances, _llm_interface, _fmm_interface,
-                    **override_kwargs):
+def get_environment(
+        args, split, _instances, _llm_interface, _fmm_interface,
+        **override_kwargs):
     kwargs = dict(
         instances=_instances,
-        cache_path=args['env'][f'{split}_cache_path'],
+        top_k_evidence=args['env']['top_k_evidence'],
         llm_name_or_interface=_llm_interface,
         fmm_name_or_interface=_fmm_interface,
-        reward_type=args['env']['reward_type'],
         num_future_diagnoses_threshold=
             args['env']['num_future_diagnoses_threshold'],
-        progress_bar=stqdm,
-        top_k_evidence=args['env']['top_k_evidence'],
-        verbosity=1, # don't print anything when an environment is dead
+        match_confident_diagnoses=args['env']['match_confident_diagnoses'],
+        match_potential_diagnoses=args['env']['match_potential_diagnoses'],
+        true_positive_minimum=args['env']['true_positive_minimum'],
+        cache_path=args['env'][f'{split}_cache_path'],
         add_risk_factor_queries=args['env']['add_risk_factor_queries'],
         limit_options_with_llm=args['env']['limit_options_with_llm'],
-        add_none_of_the_above_option=
-            args['env']['add_none_of_the_above_option'],
-        true_positive_minimum=args['env']['true_positive_minimum'],
         use_confident_diagnosis_mapping=
             args['env']['use_confident_diagnosis_mapping'],
         skip_instances_with_gt_n_reports=
             args['env']['skip_instances_with_gt_n_reports'],
+        add_diagnosis_options_from_caches=
+            args['env']['add_diagnosis_options_from_caches'],
+        reward_type=args['env']['reward_type'],
+        include_alternative_diagnoses=
+            args['env']['include_alternative_diagnoses'],
+        add_none_of_the_above_option=
+            args['env']['add_none_of_the_above_option'],
         exclude_evidence=args['env']['exclude_evidence'],
+        progress_bar=stqdm,
+        verbosity=1, # don't print anything when an environment is dead
     )
     kwargs.update(override_kwargs)
-    return gymnasium.make('ehr_diagnosis_env/EHRDiagnosisEnv-v0', **kwargs)
+    return gymnasium.make(
+        'ehr_diagnosis_env/' + args['env']['env_type'], **kwargs)
 
 
 def get_reset_options(args, i, **kwargs):
