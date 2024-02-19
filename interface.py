@@ -50,7 +50,8 @@ def get_actor(args, actor_checkpoint):
     if args['static_bias_params'] is not None:
         actor_params['static_bias_params'] = args['static_bias_params']
     actor = actor_types[checkpoint_args.actor.value.type](actor_params)
-    state_dict = torch.load(args['models'][actor_checkpoint])['actor']
+    state_dict = torch.load(
+        args['models'][actor_checkpoint], map_location='cpu')['actor']
     actor.load_state_dict(state_dict)
     actor.eval()
     return actor
@@ -106,7 +107,7 @@ def make_plot(options, probs, not_dist=False, ylabel='probability', ax=None):
         chart.set_ylim(0, 1)
     ax.spines[['right', 'top']].set_visible(False)
     ax.set_xlabel("")
-    ax.set_xticklabels(ax.get_xticklabels(), rotation = 20)
+    ax.set_xticklabels(ax.get_xticklabels(), rotation = 20, ha='right')
     for i, v in enumerate(probs):
         ax.text(i - .2, v.item() + 0.01, '{:.1f}%'.format(v.item() * 100))
     if fig is not None:
@@ -252,29 +253,31 @@ with st.sidebar:
             else:
                 max_annotated_instance = None
                 partially_annotated_instance_metadata = None
-            if f'balanced_instance_sample_{split}' not in st.session_state.keys() \
-                    or st.button('Re-sample Instances'):
-                if max_annotated_instance is not None:
-                    filtered_instance_metadata = filtered_instance_metadata[
-                        filtered_instance_metadata['episode_idx'].apply(
-                            lambda x: x + 1 > max_annotated_instance)]
-                positives = filtered_instance_metadata[
-                    filtered_instance_metadata['target diagnosis countdown'].apply(
-                        lambda x: x == x and len(x[0]) > 0)]
-                # TODO add in parameter to control sampling
-                negatives = filtered_instance_metadata[
-                    filtered_instance_metadata['target diagnosis countdown'].apply(
-                        lambda x: x == x and len(x[0]) == 0)].sample(
-                            n=len(positives))
-                balanced_instance_sample = pd.concat([positives, negatives])
-                if partially_annotated_instance_metadata is not None:
-                    balanced_instance_sample = pd.concat([
-                        partially_annotated_instance_metadata,
-                        balanced_instance_sample])
-                st.session_state[f'balanced_instance_sample_{split}'] = \
-                    balanced_instance_sample
-            filtered_instance_metadata = st.session_state[
-                f'balanced_instance_sample_{split}']
+            if args['annotations']['balance_samples']:
+                if f'balanced_instance_sample_{split}' \
+                        not in st.session_state.keys() \
+                        or st.button('Re-sample Instances'):
+                    if max_annotated_instance is not None:
+                        filtered_instance_metadata = filtered_instance_metadata[
+                            filtered_instance_metadata['episode_idx'].apply(
+                                lambda x: x + 1 > max_annotated_instance)]
+                    positives = filtered_instance_metadata[
+                        filtered_instance_metadata['target diagnosis countdown'].apply(
+                            lambda x: x == x and len(x[0]) > 0)]
+                    # TODO add in parameter to control sampling
+                    negatives = filtered_instance_metadata[
+                        filtered_instance_metadata['target diagnosis countdown'].apply(
+                            lambda x: x == x and len(x[0]) == 0)].sample(
+                                n=len(positives))
+                    balanced_instance_sample = pd.concat([positives, negatives])
+                    if partially_annotated_instance_metadata is not None:
+                        balanced_instance_sample = pd.concat([
+                            partially_annotated_instance_metadata,
+                            balanced_instance_sample])
+                    st.session_state[f'balanced_instance_sample_{split}'] = \
+                        balanced_instance_sample
+                filtered_instance_metadata = st.session_state[
+                    f'balanced_instance_sample_{split}']
         filter_instances_string = st.text_input(
             'Type a lambda expression in python that filters instances using their'
             ' cached metadata.')
@@ -397,16 +400,24 @@ if 'episode' not in st.session_state.keys():
         if use_random_start_idx:
             info = st.session_state['episode']['reset'][1]
             if comp_num_reports is None:
-                assert min_num_reports - 1 <= info['max_timesteps'] // 2 - 1
-                random_start_idx = random.randint(
-                    info['current_report'] + min_num_reports - 1,
-                    info['current_report'] + info['max_timesteps'] // 2 - 1)
+                max_observed_reports = args['max_observed_reports']
+                max_reports_left = info['max_timesteps'] // 2 - 1
+                if max_observed_reports is not None:
+                    max_reports_left = min(
+                        max_reports_left,
+                        max_observed_reports - 1 - info['current_report'])
+                num_steps = random.randint(0, max_reports_left)
             else:
-                random_start_idx = info['current_report'] + \
-                    comp_num_reports - 1
-            st.session_state['episode']['reset'] = env.reset(
-                options=get_reset_options(
-                    args, instance_index, start_report_index=random_start_idx))
+                num_steps = comp_num_reports - 1
+            # st.session_state['episode']['reset'] = env.reset(
+            #     options=get_reset_options(
+            #         args, instance_index, start_report_index=random_start_idx))
+            for i in range(num_steps):
+                next_obs, _, _, _, next_info = env.step(
+                    np.zeros_like(env.action_space.sample()))
+                next_obs, _, _, _, next_info = env.step(
+                    np.zeros_like(env.action_space.sample()))
+            st.session_state['episode']['reset'] = (next_obs, next_info)
     # store the actions for the current instance
     st.session_state['episode']['actions'] = {}
     # store the return value of the step function for the current instance
@@ -1078,6 +1089,7 @@ def display_action(args, options, action, action_stddev, i, actor_checkpoint, pa
                         key=f'option checkbox {instance_name} {actor_checkpoint} {split} {i} {option_string}'):
                     selected_options.add(j)
             st.write('Select options above to use to sort the evidence.')
+    selected_options = sorted(selected_options)
     with c1:
         actor = get_actor(args, actor_checkpoint)
         if actor.has_bias:
@@ -1085,13 +1097,47 @@ def display_action(args, options, action, action_stddev, i, actor_checkpoint, pa
                 bias_dist = get_static_bias_dist(actor, parameter_votes_info)
             else:
                 bias_dist = get_evidence_dist(actor, parameter_votes_info, 0)
-            bias_dist = bias_dist[torch.tensor(sorted(selected_options))]
+            selected_options_bias_dist = bias_dist[
+                torch.tensor(selected_options)]
         else:
             bias_dist = None
+            selected_options_bias_dist = None
+        selected_options_dist = torch.tensor(action)[
+            torch.tensor(selected_options)]
+        max_selected_options = 6
+        if len(selected_options) > max_selected_options:
+            dist_exp = torch.sigmoid(selected_options_dist) \
+                if reward_type == 'continuous_independent' else \
+                torch.softmax(selected_options_dist, 0)
+            sorted_selected_options = [
+                x[0] for x in sorted(
+                    list(zip(selected_options, list(dist_exp))),
+                    key=lambda x: x[1])][:max_selected_options]
+            if bias_dist is not None:
+                sorted_selected_options1 = sorted_selected_options[
+                    :max_selected_options // 2]
+                bias_dist_exp = torch.sigmoid(selected_options_bias_dist) \
+                    if reward_type == 'continuous_independent' else \
+                    torch.softmax(selected_options_bias_dist, 0)
+                dist_over_bias = dist_exp / bias_dist_exp
+                sorted_selected_options2 = [
+                    x[0] for x in sorted(
+                        list(zip(selected_options, list(dist_over_bias))),
+                        key=lambda x: x[1])
+                    if x not in sorted_selected_options1][
+                        :max_selected_options // 2]
+                sorted_selected_options = sorted_selected_options1 + \
+                    sorted_selected_options2
+            selected_options = sorted(sorted_selected_options)
+            selected_options_dist = torch.tensor(action)[
+                torch.tensor(selected_options)]
+            if bias_dist is not None:
+                selected_options_bias_dist = bias_dist[
+                    torch.tensor(selected_options)]
         make_evidence_plot(
             [options[j] for j in selected_options],
-            torch.tensor(action)[torch.tensor(sorted(selected_options))],
-            bias_dist=bias_dist, show_bias=True)
+            selected_options_dist,
+            bias_dist=selected_options_bias_dist, show_bias=True)
     return selected_options, anns
 
 
@@ -1117,6 +1163,7 @@ def write_annotations(
                 'report_tracker'].visited_report_timestamps,
         **anns
     }
+    import pdb; pdb.set_trace()
     # st.success(all_anns)
     if not os.path.exists(args['annotations']['path']):
         os.mkdir(args['annotations']['path'])
@@ -1263,7 +1310,7 @@ def raw_timestep(
     reports = pd.concat(
                 [df_from_string(observation['past_reports']),
                     df_from_string(observation['reports'])]).reset_index()
-    reports['date'] = pd.to_datetime(reports['date'])
+    reports['date'] = pd.to_datetime(reports['date'], format='mixed')
     reports = process_reports(
                 reports, reference_row_idx=info['start_report'])
     reports = reports[::-1]
@@ -1317,17 +1364,17 @@ def show_model_outputs(
                         # edited_df = st.data_editor(action_df, key=f'action editor {i}')
                 action_dict = edited_df.to_dict()['rating']
                 action = [action_dict[d] for d in options]
-    elif args['random_query'] and not observation['evidence_is_retrieved']:
-        action = env.action_space.sample()
+    elif args['query_type'] == 'zeros' and not observation['evidence_is_retrieved']:
+        action = np.zeros_like(env.action_space.sample())
     else:
         checkpoint_args = get_checkpoint_args(args, actor_checkpoint)
         assert reward_type == checkpoint_args.env.value.reward_type
         if 'model_anns' not in anns.keys():
             anns['model_anns'] = {}
         anns['model_anns'][actor_checkpoint] = {}
-        parameter_votes_info, parameters_info, action, \
-                    action_stddev = sample_action(
-                    args, observation, actor_checkpoint)
+        parameter_votes_info, parameters_info, action, action_stddev = \
+            sample_action(
+            args, observation, actor_checkpoint)
         action = np.array(action, dtype=float)
         if show and (not annotate or len(anns['seen_targets']) == 0):
             with prediction_container:
@@ -1388,10 +1435,12 @@ def run_timestep(
                 weights=[1] * len(actor_checkpoints)
                 counts = Counter([] if comp_model_and_sorting is None else
                     [model for model, _ in comp_model_and_sorting])
-                weights[actor_checkpoints.index('all_sentences')] = \
-                    1 - counts['all_sentences']
-                weights[actor_checkpoints.index('llm_evidence')] = \
-                    2 - counts['llm_evidence']
+                if 'all_sentences' in actor_checkpoints:
+                    weights[actor_checkpoints.index('all_sentences')] = \
+                        1 - counts['all_sentences']
+                if 'llm_evidence' in actor_checkpoints:
+                    weights[actor_checkpoints.index('llm_evidence')] = \
+                        2 - counts['llm_evidence']
                 st.session_state['episode']['chosen_actor'] = random.choices(
                     actor_checkpoints, weights=weights, k=1)[0]
                 print('Model:', st.session_state['episode']['chosen_actor'])

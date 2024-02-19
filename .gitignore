@@ -157,3 +157,4 @@ annotations/
 target_annotations/
 saved_models/
 hallucination_annotations/
+env/

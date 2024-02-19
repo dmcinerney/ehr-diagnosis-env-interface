@@ -61,12 +61,19 @@ def get_report_name(row, reference_date=None):
     report_type += ': \"{}\"'.format(row.text.strip().split('\n')[0])
     date = row.date.strftime('%m/%d/%Y') if reference_date is None else \
         'day {}'.format((row.date - reference_date).days)
-    return '{}. {} - {} ({})'.format(
-        row.name + 1,
-        row.hadm_id,
-        report_type,
-        date,
-    )
+    if 'hadm_id' in row.keys():
+        return '{}. {} - {} ({})'.format(
+            row.name + 1,
+            row.hadm_id,
+            report_type,
+            date,
+        )
+    else:
+        return '{}. {} ({})'.format(
+            row.name + 1,
+            report_type,
+            date,
+        )
 
 
 def df_from_string(df):
@@ -91,37 +98,22 @@ def get_env_models(args):
 def get_environment(
         args, split, _instances, _llm_interface, _fmm_interface,
         **override_kwargs):
-    kwargs = dict(
+    env_args = dict(**args['env']['other_args'])
+    env_args.update(
         instances=_instances,
-        top_k_evidence=args['env']['top_k_evidence'],
+        cache_path=args['env'][f'{split}_cache_path'],
         llm_name_or_interface=_llm_interface,
         fmm_name_or_interface=_fmm_interface,
-        num_future_diagnoses_threshold=
-            args['env']['num_future_diagnoses_threshold'],
-        match_confident_diagnoses=args['env']['match_confident_diagnoses'],
-        match_potential_diagnoses=args['env']['match_potential_diagnoses'],
-        true_positive_minimum=args['env']['true_positive_minimum'],
-        cache_path=args['env'][f'{split}_cache_path'],
-        add_risk_factor_queries=args['env']['add_risk_factor_queries'],
-        limit_options_with_llm=args['env']['limit_options_with_llm'],
-        use_confident_diagnosis_mapping=
-            args['env']['use_confident_diagnosis_mapping'],
-        skip_instances_with_gt_n_reports=
-            args['env']['skip_instances_with_gt_n_reports'],
-        add_diagnosis_options_from_caches=
-            args['env']['add_diagnosis_options_from_caches'],
-        reward_type=args['env']['reward_type'],
-        include_alternative_diagnoses=
-            args['env']['include_alternative_diagnoses'],
-        add_none_of_the_above_option=
-            args['env']['add_none_of_the_above_option'],
-        exclude_evidence=args['env']['exclude_evidence'],
         progress_bar=stqdm,
+        reward_type=args['env']['reward_type'],
         verbosity=1, # don't print anything when an environment is dead
     )
-    kwargs.update(override_kwargs)
-    return gymnasium.make(
-        'ehr_diagnosis_env/' + args['env']['env_type'], **kwargs)
+    env_args.update(override_kwargs)
+    env: EHRDiagnosisEnv = gymnasium.make(
+        'ehr_diagnosis_env/' + args['env']['env_type'],
+        **env_args,
+    ) # type: ignore
+    return env
 
 
 def get_reset_options(args, i, **kwargs):
